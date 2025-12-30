@@ -1,0 +1,17 @@
+bg/chitalishte/repository/MunicipalityMetricsRepository.class
+bg/chitalishte/entity/ChitalishteYearData.class
+bg/chitalishte/ChitalishteApplication.class
+bg/chitalishte/service/ChitalishteImportService.class
+bg/chitalishte/entity/Chitalishte$ChitalishteBuilder.class
+bg/chitalishte/service/MunicipalityMetricsService.class
+bg/chitalishte/repository/MunicipalityRepository.class
+bg/chitalishte/entity/MunicipalityMetrics$MunicipalityMetricsBuilder.class
+bg/chitalishte/entity/Chitalishte.class
+bg/chitalishte/service/ChitalishteImportService$1.class
+bg/chitalishte/repository/ChitalishteYearDataRepository.class
+bg/chitalishte/entity/Municipality.class
+bg/chitalishte/repository/ChitalishteRepository.class
+bg/chitalishte/entity/MunicipalityMetrics.class
+bg/chitalishte/entity/Municipality$MunicipalityBuilder.class
+bg/chitalishte/entity/ChitalishteYearData$ChitalishteYearDataBuilder.class
+bg/chitalishte/controller/ChitalishteController.class
