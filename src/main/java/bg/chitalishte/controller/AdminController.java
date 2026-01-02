@@ -1,13 +1,16 @@
 package bg.chitalishte.controller;
 
+import bg.chitalishte.service.ChitalishteImportService;
 import bg.chitalishte.service.MunicipalityMetricsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @Slf4j
 @RestController
@@ -17,11 +20,49 @@ import java.util.Map;
 public class AdminController {
 
     private final MunicipalityMetricsService metricsService;
+    private final ChitalishteImportService importService;
 
-    /**
-     * Calculate metrics for all municipalities
-     * POST /api/admin/calculate-metrics
-     */
+    @PostMapping("/chitalishta/import")
+    public ResponseEntity<?> importExcel(@RequestParam("file") MultipartFile file) {
+        try {
+            log.info("Получен файл за импорт: {}", file.getOriginalFilename());
+
+            if (file.isEmpty()) {
+                return ResponseEntity.badRequest().body("Файлът е празен");
+            }
+
+            if (!Objects.requireNonNull(file.getOriginalFilename()).endsWith(".xlsx")) {
+                return ResponseEntity.badRequest().body("Поддържа се само .xlsx формат");
+            }
+
+            Map<String, Integer> result = importService.importFromExcel(file, false);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Успешен импорт",
+                    "municipalities", result.get("municipalities"),
+                    "chitalishta", result.get("chitalishta"),
+                    "yearData", result.get("yearData")
+            ));
+
+        } catch (Exception e) {
+            log.error("Грешка при импорт: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "success", false,
+                    "error", e.getMessage()
+            ));
+        }
+    }
+
+    @GetMapping("/chitalishta/status")
+    public ResponseEntity<?> getStatus() {
+        return ResponseEntity.ok(Map.of(
+                "status", "OK",
+                "message", "Chitalishte Import Service е готов"
+        ));
+    }
+
+
     @PostMapping("/calculate-metrics")
     public ResponseEntity<Map<String, Object>> calculateMetrics() {
         log.info("🚀 Starting metrics calculation...");
@@ -54,10 +95,6 @@ public class AdminController {
         }
     }
 
-    /**
-     * Health check endpoint
-     * GET /api/admin/health
-     */
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
         Map<String, String> response = new HashMap<>();
