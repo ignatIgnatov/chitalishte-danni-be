@@ -28,10 +28,9 @@ public class MunicipalityController {
     @GetMapping
     public ResponseEntity<Page<MunicipalityDTO>> getAllMunicipalities(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "265") int size,
             @RequestParam(defaultValue = "municipality") String sort,
             @RequestParam(defaultValue = "asc") String dir) {
-        log.info("Fetching municipalities: page={}, size={}, sort={}, dir={}", page, size, sort, dir);
         return ResponseEntity.ok(municipalityService.getAllMunicipalities(page, size, sort, dir));
     }
 
