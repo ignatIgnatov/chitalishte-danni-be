@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/chitalishta")
@@ -26,11 +27,11 @@ public class ChitalishteController {
                 return ResponseEntity.badRequest().body("Файлът е празен");
             }
             
-            if (!file.getOriginalFilename().endsWith(".xlsx")) {
+            if (!Objects.requireNonNull(file.getOriginalFilename()).endsWith(".xlsx")) {
                 return ResponseEntity.badRequest().body("Поддържа се само .xlsx формат");
             }
             
-            Map<String, Integer> result = importService.importFromExcel(file);
+            Map<String, Integer> result = importService.importFromExcel(file, false);
             
             return ResponseEntity.ok(Map.of(
                     "success", true,

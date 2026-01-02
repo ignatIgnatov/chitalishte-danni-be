@@ -10,7 +10,13 @@ import java.util.UUID;
 @Repository
 public interface MunicipalityMetricsRepository extends JpaRepository<MunicipalityMetrics, UUID> {
 
-    Optional<MunicipalityMetrics> findByMunicipalityId(UUID municipalityId);
-
+    /**
+     * Find metrics by municipality code (nuts4)
+     */
     Optional<MunicipalityMetrics> findByMunicipalityMunicipalityCode(String municipalityCode);
+
+    /**
+     * Find metrics by municipality ID
+     */
+    Optional<MunicipalityMetrics> findByMunicipalityId(UUID municipalityId);
 }
