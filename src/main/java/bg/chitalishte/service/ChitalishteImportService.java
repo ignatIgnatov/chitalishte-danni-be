@@ -31,6 +31,8 @@ public class ChitalishteImportService {
     private final ChitalishteYearDataRepository chitalishteYearDataRepository;
     private final SettlementAggregationService aggregationService;
     private final MunicipalityMetricsService metricsService;
+    private final MunicipalityDemographicMetricsService demographicMetricsService;
+    private final MunicipalityDemographicAggregateService demographicAggregateService;
 
     // Cache for municipalities and settlements to avoid repeated queries
     private final Map<String, Municipality> municipalityCache = new HashMap<>();
@@ -111,13 +113,35 @@ public class ChitalishteImportService {
 
             // After import, aggregate settlement data and calculate metrics
             log.info("=== POST-PROCESSING STARTED ===");
-            log.info("Aggregating settlement data to municipalities...");
-            aggregationService.aggregateSettlementDataToMunicipalities();
-            log.info("Settlement aggregation completed");
 
-            log.info("Calculating municipality metrics...");
+// Step 1: Aggregate settlement data to municipalities
+            log.info("Step 1: Aggregating settlement data to municipalities...");
+            aggregationService.aggregateSettlementDataToMunicipalities();
+            log.info("✅ Settlement aggregation completed");
+
+// Step 2: FORCE recalculate ALL demographic aggregates in municipalities table
+            log.info("Step 2: FORCE recalculating demographic aggregates in municipalities (population_under_15_aggregate, population_over_65_aggregate)...");
+            try {
+                demographicAggregateService.recalculateAllDemographicAggregates();
+                log.info("✅ Demographic aggregates recalculated successfully in municipalities table");
+            } catch (Exception e) {
+                log.error("❌ Error recalculating demographic aggregates", e);
+            }
+
+// Step 2.5: Update demographic-based metrics in municipality_metrics table (NEW!)
+            log.info("Step 2.5: Updating demographic metrics in municipality_metrics (chitalishta_per_1k_children_under_15, chitalishta_per_1k_elderly)...");
+            try {
+                demographicMetricsService.updateDemographicMetrics();
+                log.info("✅ Demographic metrics updated successfully in municipality_metrics table");
+            } catch (Exception e) {
+                log.error("❌ Error updating demographic metrics", e);
+            }
+
+// Step 3: Calculate other municipality metrics
+            log.info("Step 3: Calculating other municipality metrics...");
             calculateAllMetrics();
-            log.info("Metrics calculation completed");
+            log.info("✅ Metrics calculation completed");
+
             log.info("=== POST-PROCESSING COMPLETED ===");
 
             // Return statistics
