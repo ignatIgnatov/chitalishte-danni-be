@@ -1,606 +1,590 @@
 package bg.chitalishte.service;
 
-import bg.chitalishte.entity.Chitalishte;
-import bg.chitalishte.entity.ChitalishteYearData;
-import bg.chitalishte.entity.Municipality;
-import bg.chitalishte.repository.ChitalishteRepository;
-import bg.chitalishte.repository.ChitalishteYearDataRepository;
-import bg.chitalishte.repository.MunicipalityRepository;
+import bg.chitalishte.entity.*;
+import bg.chitalishte.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
+/**
+ * Service for importing chitalishte data from Excel file
+ * Optimized with proper cache handling and no manual flush
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class ChitalishteImportService {
 
-    private final ChitalishteRepository chitalishteRepository;
     private final MunicipalityRepository municipalityRepository;
-    private final ChitalishteYearDataRepository yearDataRepository;
+    private final SettlementRepository settlementRepository;
+    private final ChitalishteRepository chitalishteRepository;
+    private final MunicipalityYearDataRepository municipalityYearDataRepository;
+    private final ChitalishteYearDataRepository chitalishteYearDataRepository;
+    private final SettlementAggregationService aggregationService;
     private final MunicipalityMetricsService metricsService;
 
+    // Cache for municipalities and settlements to avoid repeated queries
+    private final Map<String, Municipality> municipalityCache = new HashMap<>();
+    private final Map<String, Settlement> settlementCache = new HashMap<>();
+    // Cache for municipality year data to avoid importing same data multiple times
+    private final Map<String, Boolean> municipalityYearDataCache = new HashMap<>();
+
+    /**
+     * Import data from Excel file
+     * Returns statistics about the import process
+     */
     @Transactional
-    public Map<String, Integer> importFromExcel(MultipartFile file, boolean clearExisting) throws Exception {
-        log.info("🚀 Започване на импорт от Excel файл: {}", file.getOriginalFilename());
+    public Map<String, Integer> importFromExcel(InputStream inputStream) {
+        log.info("=== STARTING DATA IMPORT FROM EXCEL ===");
 
-        if (clearExisting) {
-            log.warn("⚠️ Изтриване на съществуващи данни...");
-            yearDataRepository.deleteAll();
-            chitalishteRepository.deleteAll();
-            municipalityRepository.deleteAll();
-            log.info("✅ Старите данни са изтрити");
-        }
+        municipalityCache.clear();
+        settlementCache.clear();
+        municipalityYearDataCache.clear();
 
-        try (InputStream is = file.getInputStream();
-             Workbook workbook = new XSSFWorkbook(is)) {
+        int totalRows = 0;
+        int successfulRows = 0;
+        int errorRows = 0;
+        int municipalitiesCreated = 0;
+        int settlementsCreated = 0;
+        int chitalishtaCreated = 0;
+        int municipalityYearDataImported = 0;
+
+        Workbook workbook = null;
+        try {
+            log.info("Creating workbook from input stream...");
+            workbook = WorkbookFactory.create(inputStream);
+            log.info("Workbook created successfully");
 
             Sheet sheet = workbook.getSheetAt(0);
+            int lastRowNum = sheet.getLastRowNum();
+            log.info("Sheet loaded. Total rows: {}", lastRowNum);
 
             // Skip header row
-            Iterator<Row> rowIterator = sheet.iterator();
-            if (rowIterator.hasNext()) {
-                rowIterator.next(); // skip header
-            }
-
-            // Cache структури
-            Map<String, Municipality> municipalityCache = new HashMap<>();
-            Map<String, Chitalishte> chitalishteCache = new HashMap<>();
-            List<ChitalishteYearData> allYearData = new ArrayList<>();
-
-            int newMunicipalities = 0;
-            int updatedMunicipalities = 0;
-            int newChitalishta = 0;
-            int updatedChitalishta = 0;
-
-            // Parse всички редове
-            int rowCount = 0;
-            while (rowIterator.hasNext()) {
-                Row row = rowIterator.next();
-                rowCount++;
-
-                if (rowCount % 1000 == 0) {
-                    log.info("📊 Обработени {} реда...", rowCount);
+            log.info("Starting to process rows...");
+            for (int i = 1; i <= lastRowNum; i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) {
+                    log.debug("Row {} is null, skipping", i);
+                    continue;
                 }
+
+                totalRows++;
 
                 try {
-                    // Извличане на ключови полета
-                    String municipalityCode = getStringValue(row, 12);
-                    String regN = getStringValue(row, 0);
-                    Integer year = getIntegerValue(row, 2);
-
-                    if (municipalityCode == null || regN == null || year == null) {
-                        log.warn("⚠️ Пропускане на ред {} - липсват задължителни полета", rowCount);
-                        continue;
+                    boolean imported = processRow(row);
+                    if (imported) {
+                        municipalityYearDataImported++;
                     }
+                    successfulRows++;
 
-                    // Вземи/създай/актуализирай община
-                    Municipality municipality;
-                    if (municipalityCache.containsKey(municipalityCode)) {
-                        municipality = municipalityCache.get(municipalityCode);
-                    } else {
-                        Optional<Municipality> existing = municipalityRepository
-                                .findByMunicipalityCode(municipalityCode);
-
-                        if (existing.isPresent()) {
-                            municipality = existing.get();
-                            updateMunicipalityFromRow(municipality, row);
-                            updatedMunicipalities++;
-                            log.debug("🔄 Актуализирана община: {}", municipalityCode);
-                        } else {
-                            municipality = parseMunicipality(row);
-                            newMunicipalities++;
-                            log.debug("✨ Нова община: {}", municipalityCode);
-                        }
-                        municipalityCache.put(municipalityCode, municipality);
+                    // Log progress every 50 rows (NO FLUSH!)
+                    if (successfulRows % 50 == 0) {
+                        log.info("Progress: processed {} / {} rows successfully", successfulRows, totalRows);
                     }
-
-                    // Вземи/създай/актуализирай читалище
-                    Chitalishte chitalishte;
-                    if (chitalishteCache.containsKey(regN)) {
-                        chitalishte = chitalishteCache.get(regN);
-                    } else {
-                        Optional<Chitalishte> existing = chitalishteRepository.findByRegN(regN);
-
-                        if (existing.isPresent()) {
-                            chitalishte = existing.get();
-                            updateChitalishteFromRow(chitalishte, row, municipality);
-                            updatedChitalishta++;
-                            log.debug("🔄 Актуализирано читалище: {}", regN);
-                        } else {
-                            chitalishte = parseChitalishte(row, municipality);
-                            newChitalishta++;
-                            log.debug("✨ Ново читалище: {}", regN);
-                        }
-                        chitalishteCache.put(regN, chitalishte);
-                    }
-
-                    // Създай/актуализирай годишни данни
-                    Optional<ChitalishteYearData> existingYearData =
-                            yearDataRepository.findByChitalishteRegNAndYear(regN, year);
-
-                    ChitalishteYearData yearData;
-                    if (existingYearData.isPresent()) {
-                        yearData = existingYearData.get();
-                        updateYearDataFromRow(yearData, row, year);
-                        log.debug("🔄 Актуализирани данни за {} - {}", regN, year);
-                    } else {
-                        yearData = parseYearData(row, chitalishte, year);
-                        log.debug("✨ Нови данни за {} - {}", regN, year);
-                    }
-                    allYearData.add(yearData);
-
                 } catch (Exception e) {
-                    log.error("❌ Грешка при обработка на ред {}: {}", rowCount, e.getMessage());
+                    errorRows++;
+                    log.error("Error processing row {}: {}", i, e.getMessage());
+                    if (log.isDebugEnabled()) {
+                        log.debug("Full error for row {}", i, e);
+                    }
                 }
             }
 
-            // Записване в базата
-            log.info("💾 Записване на {} общини (нови: {}, актуализирани: {})...",
-                    municipalityCache.size(), newMunicipalities, updatedMunicipalities);
-            List<Municipality> municipalities = new ArrayList<>(municipalityCache.values());
-            municipalityRepository.saveAll(municipalities);
+            municipalitiesCreated = municipalityCache.size();
+            settlementsCreated = settlementCache.size();
+            chitalishtaCreated = (int) chitalishteRepository.count();
 
-            log.info("💾 Записване на {} читалища (нови: {}, актуализирани: {})...",
-                    chitalishteCache.size(), newChitalishta, updatedChitalishta);
-            List<Chitalishte> chitalishta = new ArrayList<>(chitalishteCache.values());
-            chitalishteRepository.saveAll(chitalishta);
+            log.info("=== IMPORT COMPLETED ===");
+            log.info("Total rows: {}, Successful: {}, Errors: {}", totalRows, successfulRows, errorRows);
+            log.info("Created/Updated - Municipalities: {}, Settlements: {}, Chitalishta: {}",
+                    municipalitiesCreated, settlementsCreated, chitalishtaCreated);
+            log.info("Municipality year data imported: {}", municipalityYearDataImported);
 
-            log.info("💾 Записване на {} годишни записа...", allYearData.size());
-            yearDataRepository.saveAll(allYearData);
+            // After import, aggregate settlement data and calculate metrics
+            log.info("=== POST-PROCESSING STARTED ===");
+            log.info("Aggregating settlement data to municipalities...");
+            aggregationService.aggregateSettlementDataToMunicipalities();
+            log.info("Settlement aggregation completed");
 
-            // Изчисляване на показатели
-            log.info("📊 Изчисляване на показатели за общините...");
-            metricsService.calculateAllMetrics();
+            log.info("Calculating municipality metrics...");
+            calculateAllMetrics();
+            log.info("Metrics calculation completed");
+            log.info("=== POST-PROCESSING COMPLETED ===");
 
-            log.info("✅ Успешен импорт! Общини: {} ({} нови, {} актуализирани), " +
-                            "Читалища: {} ({} нови, {} актуализирани), Годишни данни: {}",
-                    municipalities.size(), newMunicipalities, updatedMunicipalities,
-                    chitalishta.size(), newChitalishta, updatedChitalishta,
-                    allYearData.size());
+            // Return statistics
+            Map<String, Integer> stats = new HashMap<>();
+            stats.put("totalRows", totalRows);
+            stats.put("successfulRows", successfulRows);
+            stats.put("errorRows", errorRows);
+            stats.put("municipalitiesCreated", municipalitiesCreated);
+            stats.put("settlementsCreated", settlementsCreated);
+            stats.put("chitalishtaCreated", chitalishtaCreated);
+            stats.put("municipalityYearDataImported", municipalityYearDataImported);
 
-            Map<String, Integer> result = new HashMap<>();
-            result.put("municipalities", municipalities.size());
-            result.put("newMunicipalities", newMunicipalities);
-            result.put("updatedMunicipalities", updatedMunicipalities);
-            result.put("chitalishta", chitalishta.size());
-            result.put("newChitalishta", newChitalishta);
-            result.put("updatedChitalishta", updatedChitalishta);
-            result.put("yearData", allYearData.size());
-            return result;
+            log.info("=== IMPORT STATISTICS ===");
+            stats.forEach((key, value) -> log.info("{}: {}", key, value));
+
+            return stats;
 
         } catch (Exception e) {
-            log.error("❌ Грешка при импорт: {}", e.getMessage(), e);
-            throw new Exception("Грешка при импорт на данни: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Актуализира Municipality от Excel ред
-     */
-    private void updateMunicipalityFromRow(Municipality municipality, Row row) {
-        municipality.setMunicipality(getStringValue(row, 4));
-        municipality.setMunicipalityNorm(getStringValue(row, 9));
-        municipality.setDistrict(getStringValue(row, 3));
-        municipality.setDistrictCode(getStringValue(row, 11));
-        municipality.setNuts1(getStringValue(row, 14));
-        municipality.setNuts2(getStringValue(row, 15));
-        municipality.setNuts3(getStringValue(row, 16));
-        municipality.setMrrbCategory(getStringValue(row, 18));
-        municipality.setSettlementPopulation(getIntegerValue(row, 121));
-        municipality.setMunicipalityPopulation(getIntegerValue(row, 122));
-        municipality.setTotalPopulation2021(getIntegerValue(row, 122));
-        municipality.setPopulationUnder15(getIntegerValue(row, 123));
-        municipality.setPopulation1564(getIntegerValue(row, 124));
-        municipality.setPopulationOver65(getIntegerValue(row, 125));
-        municipality.setHigherEducation(getIntegerValue(row, 126));
-        municipality.setSecondaryEducation(getIntegerValue(row, 127));
-        municipality.setPrimaryEducation(getIntegerValue(row, 128));
-        municipality.setElementaryEducation(getIntegerValue(row, 129));
-        municipality.setNoEducation(getIntegerValue(row, 130));
-        municipality.setLiterate(getIntegerValue(row, 131));
-        municipality.setIlliterate(getIntegerValue(row, 132));
-        municipality.setShareBulgarian(getDoubleValue(row, 167));
-        municipality.setShareTurkish(getDoubleValue(row, 168));
-        municipality.setShareRoma(getDoubleValue(row, 169));
-        municipality.setShareOthers(getDoubleValue(row, 170));
-        municipality.setUnemploymentRate(getDoubleValue(row, 158));
-        municipality.setUnemploymentRate1529(getDoubleValue(row, 159));
-        municipality.setGrossWageMonthly(getDoubleValue(row, 160));
-        municipality.setGrossValueAddedPerPerson(getDoubleValue(row, 161));
-        municipality.setCompaniesNumber(getIntegerValue(row, 162));
-        municipality.setCompaniesPerCapita(getDoubleValue(row, 163));
-        municipality.setEmploymentRate(getDoubleValue(row, 164));
-        municipality.setUrbanPopulationPercent(getDoubleValue(row, 165));
-        municipality.setStudentsNumber(getIntegerValue(row, 172));
-        municipality.setStudentsPer1000(getDoubleValue(row, 173));
-        municipality.setKidsKindergartens(getIntegerValue(row, 176));
-        municipality.setHospitals(getIntegerValue(row, 177));
-        municipality.setNChitalishaMunip(getIntegerValue(row, 21));
-        municipality.setUniquePersonsEmployment(getIntegerValue(row, 155));
-        municipality.setMigrationCoefficient(getDoubleValue(row, 171));
-        municipality.setTotalRevenueThousands(getBigDecimalValue(row, 147));
-        municipality.setRevenueFromSubsidiesThousands(getBigDecimalValue(row, 148));
-        municipality.setRevenueFromRentThousands(getBigDecimalValue(row, 149));
-        municipality.setTotalExpensesThousands(getBigDecimalValue(row, 150));
-        municipality.setExpensesSalariesThousands(getBigDecimalValue(row, 151));
-        municipality.setExpensesSocialSecurityThousands(getBigDecimalValue(row, 152));
-        municipality.setTotalStaffCount(getIntegerValue(row, 137));
-        municipality.setStaffHigherEducationCount(getIntegerValue(row, 138));
-        municipality.setStaffSecondaryEducationCount(getIntegerValue(row, 139));
-        municipality.setSecretariesCount(getIntegerValue(row, 143));
-        municipality.setSecretariesHigherEducationCount(getIntegerValue(row, 144));
-        municipality.setAverageInsuranceIncomeTd(getBigDecimalValue(row, 154));
-        municipality.setUniqueEmploymentContracts(getIntegerValue(row, 155));
-        municipality.setSubsidizedPositions(getIntegerValue(row, 156));
-        municipality.setAdditionalPositions(getIntegerValue(row, 157));
-    }
-
-    /**
-     * Актуализира Chitalishte от Excel ред
-     */
-    private void updateChitalishteFromRow(Chitalishte chitalishte, Row row, Municipality municipality) {
-        chitalishte.setMunicipality(municipality);
-        chitalishte.setName(getStringValue(row, 1));
-        chitalishte.setTown(getStringValue(row, 5));
-        chitalishte.setAddress(getStringValue(row, 6));
-        chitalishte.setUic(getStringValue(row, 7));
-        chitalishte.setPhone(getStringValue(row, 65));
-        chitalishte.setSettlementNorm(getStringValue(row, 8));
-        chitalishte.setVillageCity(getStringValue(row, 10));
-        chitalishte.setMayoralityCode(getStringValue(row, 13));
-        chitalishte.setEkatte(getStringValue(row, 17));
-        chitalishte.setIsMunipCenter(getStringValue(row, 20));
-        chitalishte.setEmplCategory(getStringValue(row, 22));
-        chitalishte.setRegionalList(getStringValue(row, 73));
-        chitalishte.setNationalList(getStringValue(row, 74));
-    }
-
-    /**
-     * Актуализира ChitalishteYearData от Excel ред
-     */
-    private void updateYearDataFromRow(ChitalishteYearData yearData, Row row, Integer year) {
-        yearData.setYear(year);
-        yearData.setChairman(getStringValue(row, 64));
-        yearData.setSecretary(getStringValue(row, 66));
-        yearData.setStatus(getStringValue(row, 67));
-        yearData.setTotalMembers(getIntegerValue(row, 68));
-        yearData.setSubmittedApplications(getIntegerValue(row, 69));
-        yearData.setNewlyAcceptedMembers(getIntegerValue(row, 70));
-        yearData.setRejectedApplications(getIntegerValue(row, 71));
-        yearData.setLibraryActivity(getStringValue(row, 72));
-        yearData.setArtClubs(getIntegerValue(row, 75));
-        yearData.setArtClubsText(getStringValue(row, 76));
-        yearData.setLanguageSchools(getIntegerValue(row, 77));
-        yearData.setLanguageSchoolsText(getStringValue(row, 78));
-        yearData.setLocalHistoryClubs(getIntegerValue(row, 79));
-        yearData.setLocalHistoryClubsText(getStringValue(row, 80));
-        yearData.setMuseumCollections(getIntegerValue(row, 81));
-        yearData.setMuseumCollectionsText(getStringValue(row, 82));
-        yearData.setFolkloreGroups(getIntegerValue(row, 83));
-        yearData.setTheaterGroups(getIntegerValue(row, 84));
-        yearData.setDanceGroups(getIntegerValue(row, 85));
-        yearData.setClassicalModernGroups(getIntegerValue(row, 86));
-        yearData.setVocalGroups(getIntegerValue(row, 87));
-        yearData.setOtherClubs(getIntegerValue(row, 88));
-        yearData.setEventParticipation(getIntegerValue(row, 89));
-        yearData.setProjectsIndependent(getIntegerValue(row, 90));
-        yearData.setProjectsCooperation(getIntegerValue(row, 91));
-        yearData.setWorkWithDisabilities(getStringValue(row, 92));
-        yearData.setOtherActivities(getStringValue(row, 93));
-        yearData.setSubsidizedStaff(getBigDecimalValue(row, 94));
-        yearData.setTotalStaff(getIntegerValue(row, 96));
-        yearData.setSpecialistsHigherEducation(getIntegerValue(row, 97));
-        yearData.setSpecializedPositions(getIntegerValue(row, 98));
-        yearData.setAdministrativePositions(getIntegerValue(row, 99));
-        yearData.setAuxiliaryStaff(getIntegerValue(row, 100));
-        yearData.setTrainingParticipation(getIntegerValue(row, 101));
-        yearData.setSanctionsImposed(getIntegerValue(row, 102));
-        yearData.setLibraryUsers(getIntegerValue(row, 103));
-        yearData.setLibraryUsersO(getIntegerValue(row, 104));
-        yearData.setLibraryUnits(getIntegerValue(row, 105));
-        yearData.setNewlyAcquired(getIntegerValue(row, 106));
-        yearData.setNewlyAcquired1(getIntegerValue(row, 107));
-        yearData.setBorrowedDocuments(getIntegerValue(row, 108));
-        yearData.setHomeVisits(getIntegerValue(row, 109));
-        yearData.setReadingRoomVisits(getIntegerValue(row, 110));
-        yearData.setInternetAccessEducation(getStringValue(row, 111));
-        yearData.setComputerizedWorkplaces(getIntegerValue(row, 112));
-        yearData.setComputerizedWorkplaces2(getIntegerValue(row, 113));
-        yearData.setProjectParticipationRegional(getIntegerValue(row, 114));
-        yearData.setProjectParticipationNational(getIntegerValue(row, 115));
-        yearData.setProjectParticipationInternational(getIntegerValue(row, 116));
-        yearData.setStaffPositionsTotal(getIntegerValue(row, 117));
-        yearData.setStaffPositionsHigherEducation(getIntegerValue(row, 118));
-        yearData.setStaffPositionsSecondaryEducation(getIntegerValue(row, 119));
-        yearData.setStaffQualificationParticipation(getIntegerValue(row, 120));
-        yearData.setBoardMembersTotal(getIntegerValue(row, 133));
-        yearData.setBoardMembersHigherEd(getIntegerValue(row, 134));
-        yearData.setBoardMembersSecondaryEd(getIntegerValue(row, 135));
-        yearData.setBoardMembersPrimaryEd(getIntegerValue(row, 136));
-        yearData.setStaffTotal(getIntegerValue(row, 137));
-        yearData.setStaffHigherEd(getIntegerValue(row, 138));
-        yearData.setStaffSecondaryEd(getIntegerValue(row, 139));
-        yearData.setStaffPrimaryEd(getIntegerValue(row, 140));
-        yearData.setStaffEmploymentContract(getIntegerValue(row, 141));
-        yearData.setStaffCivilContract(getIntegerValue(row, 142));
-        yearData.setSecretariesTotal(getIntegerValue(row, 143));
-        yearData.setSecretariesHigherEd(getIntegerValue(row, 144));
-        yearData.setSecretariesSecondaryEd(getIntegerValue(row, 145));
-        yearData.setSecretariesPrimaryEd(getIntegerValue(row, 146));
-        yearData.setTotalRevenue(getBigDecimalValue(row, 147));
-        yearData.setRevenueSubsidies(getBigDecimalValue(row, 148));
-        yearData.setRevenueRent(getBigDecimalValue(row, 149));
-        yearData.setTotalExpenses(getBigDecimalValue(row, 150));
-        yearData.setExpensesSalaries(getBigDecimalValue(row, 151));
-        yearData.setExpensesSocialSecurity(getBigDecimalValue(row, 152));
-        yearData.setEmploymentContractsCount(getIntegerValue(row, 153));
-        yearData.setAverageInsuranceIncome(getBigDecimalValue(row, 154));
-        yearData.setTotalSubsidizedPositions(getIntegerValue(row, 156));
-        yearData.setAdditionalPositions(getBigDecimalValue(row, 157));
-        // F-формуляри и останалите полета...
-        yearData.setF130001TotalExpenditure(getBigDecimalValue(row, 23));
-        yearData.setF141001AccProfit(getBigDecimalValue(row, 24));
-        yearData.setF144001Pofit(getBigDecimalValue(row, 25));
-        yearData.setF150001OperatingIncome(getBigDecimalValue(row, 26));
-        yearData.setF180001TotalIncome(getBigDecimalValue(row, 27));
-        yearData.setF191001accLoss(getBigDecimalValue(row, 28));
-        yearData.setF192001zLoss(getBigDecimalValue(row, 29));
-        yearData.setF31000ExtServicesSpending(getBigDecimalValue(row, 30));
-        yearData.setF021001NontangibleAssets(getBigDecimalValue(row, 31));
-        yearData.setF020001FixedAssets(getBigDecimalValue(row, 32));
-        yearData.setF031001MaterialReserves(getBigDecimalValue(row, 33));
-        yearData.setF032001Receivables(getBigDecimalValue(row, 34));
-        yearData.setF033001Investment(getBigDecimalValue(row, 35));
-        yearData.setF034001Bankroll(getBigDecimalValue(row, 36));
-        yearData.setF030001CurrentAssets(getBigDecimalValue(row, 37));
-        yearData.setF045001TotalAssets(getBigDecimalValue(row, 38));
-        yearData.setF050001OwnCapital(getBigDecimalValue(row, 39));
-        yearData.setF070001Obligations(getBigDecimalValue(row, 40));
-        yearData.setF070011ShorttermObligations(getBigDecimalValue(row, 41));
-        yearData.setF070021LongtermObligations(getBigDecimalValue(row, 42));
-        yearData.setAverageAnnualStaff(getBigDecimalValue(row, 43));
-        yearData.setNetIncome(getBigDecimalValue(row, 44));
-        yearData.setRazhodiPersonal(getBigDecimalValue(row, 45));
-        yearData.setTradePrice(getBigDecimalValue(row, 46));
-        yearData.setIncomeProfit(getBigDecimalValue(row, 47));
-        yearData.setEquityProfit(getBigDecimalValue(row, 48));
-        yearData.setAssetProfit(getBigDecimalValue(row, 49));
-        yearData.setFinancialAutonomy(getBigDecimalValue(row, 50));
-        yearData.setFinancialDebt(getBigDecimalValue(row, 51));
-        yearData.setShortTermLiquidity(getBigDecimalValue(row, 52));
-        yearData.setFastLiquidity(getBigDecimalValue(row, 53));
-        yearData.setImmediateLiquidity(getBigDecimalValue(row, 54));
-        yearData.setAbsoluteLiquidity(getBigDecimalValue(row, 55));
-        yearData.setVremeOborot(getBigDecimalValue(row, 56));
-        yearData.setBrOb(getBigDecimalValue(row, 57));
-        yearData.setZkma(getStringValue(row, 58));
-        yearData.setAktiviPersonal(getBigDecimalValue(row, 59));
-        yearData.setZadaljeniaPerс(getBigDecimalValue(row, 60));
-        yearData.setPrihodiPers(getBigDecimalValue(row, 61));
-        yearData.setPechalbaPerс(getBigDecimalValue(row, 62));
-        yearData.setPersonal(getBigDecimalValue(row, 63));
-        yearData.setPaymentStandard(getStringValue(row, 19));
-        yearData.setMatriculationBel26(getBigDecimalValue(row, 166));
-        yearData.setNvoMat(getBigDecimalValue(row, 174));
-        yearData.setNvoBel(getBigDecimalValue(row, 175));
-        yearData.setPoorHealth(getIntegerValue(row, 178));
-    }
-
-    // Оригиналните parse методи остават същите...
-    private Municipality parseMunicipality(Row row) {
-        return Municipality.builder()
-                .municipalityCode(getStringValue(row, 12))
-                .municipality(getStringValue(row, 4))
-                .municipalityNorm(getStringValue(row, 9))
-                .district(getStringValue(row, 3))
-                .districtCode(getStringValue(row, 11))
-                .nuts1(getStringValue(row, 14))
-                .nuts2(getStringValue(row, 15))
-                .nuts3(getStringValue(row, 16))
-                .mrrbCategory(getStringValue(row, 18))
-                .settlementPopulation(getIntegerValue(row, 121))
-                .municipalityPopulation(getIntegerValue(row, 122))
-                .totalPopulation2021(getIntegerValue(row, 122))
-                .populationUnder15(getIntegerValue(row, 123))
-                .population1564(getIntegerValue(row, 124))
-                .populationOver65(getIntegerValue(row, 125))
-                .higherEducation(getIntegerValue(row, 126))
-                .secondaryEducation(getIntegerValue(row, 127))
-                .primaryEducation(getIntegerValue(row, 128))
-                .elementaryEducation(getIntegerValue(row, 129))
-                .noEducation(getIntegerValue(row, 130))
-                .literate(getIntegerValue(row, 131))
-                .illiterate(getIntegerValue(row, 132))
-                .shareBulgarian(getDoubleValue(row, 167))
-                .shareTurkish(getDoubleValue(row, 168))
-                .shareRoma(getDoubleValue(row, 169))
-                .shareOthers(getDoubleValue(row, 170))
-                .unemploymentRate(getDoubleValue(row, 158))
-                .unemploymentRate1529(getDoubleValue(row, 159))
-                .grossWageMonthly(getDoubleValue(row, 160))
-                .grossValueAddedPerPerson(getDoubleValue(row, 161))
-                .companiesNumber(getIntegerValue(row, 162))
-                .companiesPerCapita(getDoubleValue(row, 163))
-                .employmentRate(getDoubleValue(row, 164))
-                .urbanPopulationPercent(getDoubleValue(row, 165))
-                .studentsNumber(getIntegerValue(row, 172))
-                .studentsPer1000(getDoubleValue(row, 173))
-                .kidsKindergartens(getIntegerValue(row, 176))
-                .hospitals(getIntegerValue(row, 177))
-                .nChitalishaMunip(getIntegerValue(row, 21))
-                .uniquePersonsEmployment(getIntegerValue(row, 155))
-                .migrationCoefficient(getDoubleValue(row, 171))
-                .totalRevenueThousands(getBigDecimalValue(row, 147))
-                .revenueFromSubsidiesThousands(getBigDecimalValue(row, 148))
-                .revenueFromRentThousands(getBigDecimalValue(row, 149))
-                .totalExpensesThousands(getBigDecimalValue(row, 150))
-                .expensesSalariesThousands(getBigDecimalValue(row, 151))
-                .expensesSocialSecurityThousands(getBigDecimalValue(row, 152))
-                .totalStaffCount(getIntegerValue(row, 137))
-                .staffHigherEducationCount(getIntegerValue(row, 138))
-                .staffSecondaryEducationCount(getIntegerValue(row, 139))
-                .secretariesCount(getIntegerValue(row, 143))
-                .secretariesHigherEducationCount(getIntegerValue(row, 144))
-                .averageInsuranceIncomeTd(getBigDecimalValue(row, 154))
-                .uniqueEmploymentContracts(getIntegerValue(row, 155))
-                .subsidizedPositions(getIntegerValue(row, 156))
-                .additionalPositions(getIntegerValue(row, 157))
-                .build();
-    }
-
-    private Chitalishte parseChitalishte(Row row, Municipality municipality) {
-        return Chitalishte.builder()
-                .municipality(municipality)
-                .regN(getStringValue(row, 0))
-                .name(getStringValue(row, 1))
-                .town(getStringValue(row, 5))
-                .address(getStringValue(row, 6))
-                .uic(getStringValue(row, 7))
-                .phone(getStringValue(row, 65))
-                .settlementNorm(getStringValue(row, 8))
-                .villageCity(getStringValue(row, 10))
-                .mayoralityCode(getStringValue(row, 13))
-                .ekatte(getStringValue(row, 17))
-                .isMunipCenter(getStringValue(row, 20))
-                .emplCategory(getStringValue(row, 22))
-                .regionalList(getStringValue(row, 73))
-                .nationalList(getStringValue(row, 74))
-                .build();
-    }
-
-    private ChitalishteYearData parseYearData(Row row, Chitalishte chitalishte, Integer year) {
-        ChitalishteYearData yearData = new ChitalishteYearData();
-        yearData.setChitalishte(chitalishte);
-        updateYearDataFromRow(yearData, row, year);
-        return yearData;
-    }
-
-    // Helper методи остават същите...
-    private String getStringValue(Row row, int cellIndex) {
-        Cell cell = row.getCell(cellIndex);
-        if (cell == null) {
-            return null;
-        }
-
-        String value;
-        switch (cell.getCellType()) {
-            case STRING:
-                value = cell.getStringCellValue();
-                break;
-            case NUMERIC:
-                if (DateUtil.isCellDateFormatted(cell)) {
-                    value = cell.getDateCellValue().toString();
-                } else {
-                    value = String.valueOf((long) cell.getNumericCellValue());
-                }
-                break;
-            case BOOLEAN:
-                value = String.valueOf(cell.getBooleanCellValue());
-                break;
-            case FORMULA:
+            log.error("=== FATAL ERROR DURING IMPORT ===", e);
+            throw new RuntimeException("Failed to import data from Excel: " + e.getMessage(), e);
+        } finally {
+            if (workbook != null) {
                 try {
-                    value = cell.getStringCellValue();
-                } catch (Exception e) {
-                    value = String.valueOf(cell.getNumericCellValue());
+                    workbook.close();
+                } catch (IOException e) {
+                    log.warn("Error closing workbook", e);
                 }
-                break;
-            default:
-                value = null;
-        }
-
-        return cleanString(value);
-    }
-
-    private String cleanString(String value) {
-        if (value == null || value.trim().isEmpty()) {
-            return null;
-        }
-        return value.trim();
-    }
-
-    private Integer getIntegerValue(Row row, int cellIndex) {
-        Cell cell = row.getCell(cellIndex);
-        if (cell == null) {
-            return null;
-        }
-
-        try {
-            switch (cell.getCellType()) {
-                case NUMERIC:
-                    return (int) cell.getNumericCellValue();
-                case STRING:
-                    String strValue = cell.getStringCellValue().trim();
-                    if (strValue.isEmpty()) {
-                        return null;
-                    }
-                    return Integer.parseInt(strValue);
-                case FORMULA:
-                    return (int) cell.getNumericCellValue();
-                default:
-                    return null;
             }
-        } catch (Exception e) {
+        }
+    }
+
+    /**
+     * Process a single row from Excel
+     * Returns true if municipality year data was imported
+     */
+    private boolean processRow(Row row) {
+        // Extract basic identifiers
+        String regN = getCellValue(row, 0);  // Column A: reg_n
+        String year = getCellValue(row, 2);  // Column C: year
+
+        if (regN == null || regN.trim().isEmpty()) {
+            log.warn("Skipping row with empty reg_n");
+            return false;
+        }
+
+        Integer yearInt = parseInteger(year);
+
+        // Process municipality
+        Municipality municipality = processOrGetMunicipality(row);
+
+        // Process settlement
+        Settlement settlement = processOrGetSettlement(row, municipality);
+
+        // Process chitalishte (static data)
+        Chitalishte chitalishte = processOrGetChitalishte(row, municipality, settlement);
+
+        // Process chitalishte year data (if year is present)
+        if (yearInt != null) {
+            processChitalishteYearData(row, chitalishte, yearInt);
+        }
+
+        // Process municipality year data (if year is present)
+        boolean imported = false;
+        if (yearInt != null) {
+            imported = processMunicipalityYearData(row, municipality, yearInt);
+        }
+
+        return imported;
+    }
+
+    /**
+     * Process or retrieve municipality
+     */
+    private Municipality processOrGetMunicipality(Row row) {
+        String municipalityCode = getCellValue(row, 12);  // Column M: municipality_code
+
+        if (municipalityCode == null || municipalityCode.trim().isEmpty()) {
+            throw new IllegalArgumentException("Municipality code is required");
+        }
+
+        // Check cache first
+        if (municipalityCache.containsKey(municipalityCode)) {
+            return municipalityCache.get(municipalityCode);
+        }
+
+        // Try to find in database
+        Municipality municipality = municipalityRepository.findByMunicipalityCode(municipalityCode)
+                .orElseGet(() -> {
+                    log.info("Creating new municipality: {}", municipalityCode);
+                    return Municipality.builder()
+                            .municipalityCode(municipalityCode)
+                            .build();
+                });
+
+        // Update municipality data (static data from Census 2021)
+        municipality.setMunicipality(getCellValue(row, 4));        // Column E
+        municipality.setMunicipalityNorm(getCellValue(row, 9));    // Column J
+        municipality.setDistrict(getCellValue(row, 3));            // Column D
+        municipality.setDistrictCode(getCellValue(row, 11));       // Column L
+        municipality.setNuts1(getCellValue(row, 14));              // Column O
+        municipality.setNuts2(getCellValue(row, 15));              // Column P
+        municipality.setNuts3(getCellValue(row, 16));              // Column Q
+        municipality.setMrrbCategory(getCellValue(row, 18));       // Column S
+        municipality.setTotalChitalishta(parseInteger(getCellValue(row, 21)));  // Column V
+        municipality.setMunicipalityPopulation(parseInteger(getCellValue(row, 122)));  // Column DS
+        municipality.setShareBulgarian(parseDouble(getCellValue(row, 167)));   // Column FL
+        municipality.setShareTurkish(parseDouble(getCellValue(row, 168)));     // Column FM
+        municipality.setShareRoma(parseDouble(getCellValue(row, 169)));        // Column FN
+        municipality.setShareOthers(parseDouble(getCellValue(row, 170)));      // Column FO
+        municipality.setMigrationCoefficient(parseDouble(getCellValue(row, 171)));  // Column FP
+
+        municipality = municipalityRepository.save(municipality);
+        municipalityCache.put(municipalityCode, municipality);
+
+        return municipality;
+    }
+
+    /**
+     * Process or retrieve settlement
+     */
+    private Settlement processOrGetSettlement(Row row, Municipality municipality) {
+        String ekatte = getCellValue(row, 17);  // Column R: ekatte
+
+        if (ekatte == null || ekatte.trim().isEmpty()) {
+            log.warn("Settlement EKATTE is empty, skipping settlement creation");
+            return null;
+        }
+
+        // Check cache first
+        if (settlementCache.containsKey(ekatte)) {
+            return settlementCache.get(ekatte);
+        }
+
+        // Try to find in database
+        Settlement settlement = settlementRepository.findByEkatte(ekatte)
+                .orElseGet(() -> {
+                    log.info("Creating new settlement: {}", ekatte);
+                    return Settlement.builder()
+                            .ekatte(ekatte)
+                            .municipality(municipality)
+                            .build();
+                });
+
+        // Update settlement data (Census 2021 data at settlement level)
+        settlement.setSettlementNorm(getCellValue(row, 8));  // Column I
+        settlement.setVillageCity(getCellValue(row, 10));    // Column K
+        settlement.setSettlementPopulation(parseInteger(getCellValue(row, 121)));     // Column DR
+        settlement.setPopulationUnder15(parseInteger(getCellValue(row, 123)));        // Column DT
+        settlement.setPopulation1564(parseInteger(getCellValue(row, 124)));           // Column DU
+        settlement.setPopulationOver65(parseInteger(getCellValue(row, 125)));         // Column DV
+        settlement.setHigherEducation(parseInteger(getCellValue(row, 126)));          // Column DW
+        settlement.setSecondaryEducation(parseInteger(getCellValue(row, 127)));       // Column DX
+        settlement.setPrimaryEducation(parseInteger(getCellValue(row, 128)));         // Column DY
+        settlement.setElementaryEducation(parseInteger(getCellValue(row, 129)));      // Column DZ
+        settlement.setNoEducation(parseInteger(getCellValue(row, 130)));              // Column EA
+        settlement.setLiterate(parseInteger(getCellValue(row, 131)));                 // Column EB
+        settlement.setIlliterate(parseInteger(getCellValue(row, 132)));               // Column EC
+
+        settlement = settlementRepository.save(settlement);
+        settlementCache.put(ekatte, settlement);
+
+        return settlement;
+    }
+
+    /**
+     * Process or retrieve chitalishte
+     */
+    private Chitalishte processOrGetChitalishte(Row row, Municipality municipality, Settlement settlement) {
+        String regN = getCellValue(row, 0);  // Column A: reg_n
+
+        Chitalishte chitalishte = chitalishteRepository.findByRegN(regN)
+                .orElseGet(() -> {
+                    log.info("Creating new chitalishte: {}", regN);
+                    return Chitalishte.builder()
+                            .regN(regN)
+                            .municipality(municipality)
+                            .settlement(settlement)
+                            .build();
+                });
+
+        // Update static chitalishte data
+        chitalishte.setName(getCellValue(row, 1));                  // Column B
+        chitalishte.setTown(getCellValue(row, 5));                  // Column F
+        chitalishte.setAddress(getCellValue(row, 6));               // Column G
+        chitalishte.setUic(getCellValue(row, 7));                   // Column H
+        chitalishte.setSettlementNorm(getCellValue(row, 8));        // Column I
+        chitalishte.setVillageCity(getCellValue(row, 10));          // Column K
+        chitalishte.setMayoralityCode(getCellValue(row, 13));       // Column N
+        chitalishte.setEkatteCode(getCellValue(row, 17));           // Column R
+        chitalishte.setIsMunipCenter(getCellValue(row, 20));        // Column U
+        chitalishte.setEmplCategory(getCellValue(row, 22));         // Column W
+        chitalishte.setPhone(getCellValue(row, 64));                // Column CM
+        chitalishte.setRegionalList(getCellValue(row, 72));         // Column DC
+        chitalishte.setNationalList(getCellValue(row, 73));         // Column DD
+
+        return chitalishteRepository.save(chitalishte);
+    }
+
+    /**
+     * Process chitalishte year data
+     */
+    private void processChitalishteYearData(Row row, Chitalishte chitalishte, Integer year) {
+        ChitalishteYearData yearData = chitalishteYearDataRepository
+                .findByChitalishteRegNAndYear(chitalishte.getRegN(), year)
+                .orElseGet(() -> ChitalishteYearData.builder()
+                        .regN(chitalishte.getRegN())
+                        .chitalishte(chitalishte)
+                        .year(year)
+                        .build());
+
+        // Financial data from Commercial Register (columns X-BL)
+        yearData.setTotalExpenditure(parseBigDecimal(getCellValue(row, 23)));      // Column X
+        yearData.setAccumulatedProfit(parseBigDecimal(getCellValue(row, 24)));     // Column Y
+        yearData.setProfit(parseBigDecimal(getCellValue(row, 25)));                // Column Z
+        yearData.setOperatingIncome(parseBigDecimal(getCellValue(row, 26)));       // Column AA
+        yearData.setTotalIncome(parseBigDecimal(getCellValue(row, 27)));           // Column AB
+        yearData.setAccumulatedLoss(parseBigDecimal(getCellValue(row, 28)));       // Column AC
+        yearData.setLoss(parseBigDecimal(getCellValue(row, 29)));                  // Column AD
+        yearData.setExternalServicesSpending(parseBigDecimal(getCellValue(row, 30)));  // Column AE
+        yearData.setIntangibleAssets(parseBigDecimal(getCellValue(row, 31)));      // Column AF
+        yearData.setFixedAssets(parseBigDecimal(getCellValue(row, 32)));           // Column AG
+        yearData.setMaterialReserves(parseBigDecimal(getCellValue(row, 33)));      // Column AH
+        yearData.setReceivables(parseBigDecimal(getCellValue(row, 34)));           // Column AI
+        yearData.setInvestment(parseBigDecimal(getCellValue(row, 35)));            // Column AJ
+        yearData.setCash(parseBigDecimal(getCellValue(row, 36)));                  // Column AK
+        yearData.setCurrentAssets(parseBigDecimal(getCellValue(row, 37)));         // Column AL
+        yearData.setTotalAssets(parseBigDecimal(getCellValue(row, 38)));           // Column AM
+        yearData.setEquity(parseBigDecimal(getCellValue(row, 39)));                // Column AN
+        yearData.setLiabilities(parseBigDecimal(getCellValue(row, 40)));           // Column AO
+        yearData.setShortTermLiabilities(parseBigDecimal(getCellValue(row, 41)));  // Column AP
+        yearData.setLongTermLiabilities(parseBigDecimal(getCellValue(row, 42)));   // Column AQ
+
+        // Financial ratios (columns AR-BL)
+        yearData.setAverageAnnualStaff(parseBigDecimal(getCellValue(row, 43)));    // Column AR
+        yearData.setNetIncome(parseBigDecimal(getCellValue(row, 44)));             // Column AS
+        yearData.setStaffExpenses(parseBigDecimal(getCellValue(row, 45)));         // Column AT
+        yearData.setTradePrice(parseBigDecimal(getCellValue(row, 46)));            // Column AU
+        yearData.setIncomeProfitability(parseBigDecimal(getCellValue(row, 47)));   // Column AV
+        yearData.setEquityProfitability(parseBigDecimal(getCellValue(row, 48)));   // Column AW
+        yearData.setAssetProfitability(parseBigDecimal(getCellValue(row, 49)));    // Column AX
+        yearData.setFinancialAutonomy(parseBigDecimal(getCellValue(row, 50)));     // Column AY
+        yearData.setFinancialDebt(parseBigDecimal(getCellValue(row, 51)));         // Column AZ
+        yearData.setShortTermLiquidity(parseBigDecimal(getCellValue(row, 52)));    // Column BA
+        yearData.setFastLiquidity(parseBigDecimal(getCellValue(row, 53)));         // Column BB
+        yearData.setImmediateLiquidity(parseBigDecimal(getCellValue(row, 54)));    // Column BC
+        yearData.setAbsoluteLiquidity(parseBigDecimal(getCellValue(row, 55)));     // Column BD
+        yearData.setTurnoverTime(parseBigDecimal(getCellValue(row, 56)));          // Column BE
+        yearData.setTurnoverCount(parseBigDecimal(getCellValue(row, 57)));         // Column BF
+        yearData.setDebtToTangibleAssets(parseBigDecimal(getCellValue(row, 58)));  // Column BG
+        yearData.setAssetsPerStaff(parseBigDecimal(getCellValue(row, 59)));        // Column BH
+        yearData.setLiabilitiesPerStaff(parseBigDecimal(getCellValue(row, 60)));   // Column BI
+        yearData.setIncomePerStaff(parseBigDecimal(getCellValue(row, 61)));        // Column BJ
+        yearData.setProfitPerStaff(parseBigDecimal(getCellValue(row, 62)));        // Column BK
+        yearData.setStaffCount(parseInteger(getCellValue(row, 63)));               // Column BL
+
+        // Registry data (columns BM-ED)
+        yearData.setChairman(getCellValue(row, 64));                // Column BM
+        yearData.setPhoneRegistry(getCellValue(row, 65));           // Column BN
+        yearData.setSecretary(getCellValue(row, 66));               // Column BO
+        yearData.setStatus(getCellValue(row, 67));                  // Column BP
+        yearData.setTotalMembers(parseInteger(getCellValue(row, 68)));             // Column BQ
+        yearData.setMembershipApplications(parseInteger(getCellValue(row, 69)));   // Column BR
+        yearData.setNewMembers(parseInteger(getCellValue(row, 70)));               // Column BS
+        yearData.setRejectedApplications(parseInteger(getCellValue(row, 71)));     // Column BT
+        yearData.setLibraryActivity(getCellValue(row, 72));         // Column BU
+        yearData.setArtClubs(parseInteger(getCellValue(row, 73)));                 // Column DE
+        yearData.setArtClubsText(getCellValue(row, 74));            // Column DF
+        yearData.setLanguageSchools(parseInteger(getCellValue(row, 75)));          // Column DG
+        yearData.setLanguageSchoolsText(getCellValue(row, 76));     // Column DH
+        yearData.setLocalHistoryClubs(parseInteger(getCellValue(row, 77)));        // Column DI
+        yearData.setLocalHistoryClubsText(getCellValue(row, 78));   // Column DJ
+        yearData.setMuseumCollections(parseInteger(getCellValue(row, 79)));        // Column DK
+        yearData.setMuseumCollectionsText(getCellValue(row, 80));   // Column DL
+        yearData.setFolkloreGroups(parseInteger(getCellValue(row, 81)));           // Column DM
+        yearData.setTheaterGroups(parseInteger(getCellValue(row, 82)));            // Column DN
+        yearData.setDanceGroups(parseInteger(getCellValue(row, 83)));              // Column DO
+        yearData.setClassicalDanceGroups(parseInteger(getCellValue(row, 84)));     // Column DP
+        yearData.setVocalGroups(parseInteger(getCellValue(row, 85)));              // Column DQ
+        yearData.setOtherClubs(parseInteger(getCellValue(row, 86)));               // Column DR
+        yearData.setEventParticipations(parseInteger(getCellValue(row, 87)));      // Column DS
+        yearData.setIndependentProjects(parseInteger(getCellValue(row, 88)));      // Column DT
+        yearData.setCollaborativeProjects(parseInteger(getCellValue(row, 89)));    // Column DU
+        yearData.setDisabilityWork(getCellValue(row, 90));          // Column DV
+        yearData.setOtherActivities(getCellValue(row, 91));         // Column DW
+        yearData.setSubsidizedStaffCount(parseInteger(getCellValue(row, 92)));     // Column DX
+        yearData.setTotalStaffRegistry(parseInteger(getCellValue(row, 93)));       // Column DY
+        yearData.setStaffHigherEdu(parseInteger(getCellValue(row, 94)));           // Column DZ
+        yearData.setSpecializedPositions(parseInteger(getCellValue(row, 95)));     // Column EA
+        yearData.setAdministrativePositions(parseInteger(getCellValue(row, 96)));  // Column EB
+        yearData.setSupportStaff(parseInteger(getCellValue(row, 97)));             // Column EC
+        yearData.setTrainingParticipation(parseInteger(getCellValue(row, 101)));    // Column CX
+        yearData.setImposedSanctions(parseInteger(getCellValue(row, 99)));         // Column ED
+
+        // Library data (columns CZ-DQ: 103-120)
+        yearData.setLibraryUsers(parseInteger(getCellValue(row, 103)));            // Column CZ
+        yearData.setLibraryUsersOnline(parseInteger(getCellValue(row, 104)));      // Column DA
+        yearData.setLibraryUnits(parseInteger(getCellValue(row, 105)));            // Column DB
+        yearData.setNewlyAcquired(parseInteger(getCellValue(row, 106)));           // Column DC
+        yearData.setNewlyAcquiredAlt(parseInteger(getCellValue(row, 107)));        // Column DD
+        yearData.setBorrowedDocuments(parseInteger(getCellValue(row, 108)));       // Column DE
+        yearData.setHomeVisits(parseInteger(getCellValue(row, 109)));              // Column DF
+        yearData.setReadingRoomVisits(parseInteger(getCellValue(row, 110)));       // Column DG
+        yearData.setInternetAccess(parseInteger(getCellValue(row, 111)));          // Column DH
+        yearData.setComputerizedWorkstations(parseInteger(getCellValue(row, 112)));     // Column DI
+        yearData.setComputerizedWorkstationsAlt(parseInteger(getCellValue(row, 113)));  // Column DJ
+        yearData.setRegionalProjects(parseInteger(getCellValue(row, 114)));        // Column DK
+        yearData.setNationalProjects(parseInteger(getCellValue(row, 115)));        // Column DL
+        yearData.setInternationalProjects(parseInteger(getCellValue(row, 116)));   // Column DM
+        yearData.setLibraryStaffTotal(parseInteger(getCellValue(row, 117)));       // Column DN
+        yearData.setLibraryStaffHigherEdu(parseInteger(getCellValue(row, 118)));   // Column DO
+        yearData.setLibraryStaffSecondaryEdu(parseInteger(getCellValue(row, 119)));     // Column DP
+        yearData.setLibraryStaffTraining(parseInteger(getCellValue(row, 120)));    // Column DQ
+
+        chitalishteYearDataRepository.save(yearData);
+    }
+
+    /**
+     * Process municipality year data
+     * NOTE: NSI data (columns EH-EW) is per MUNICIPALITY, not per chitalishte!
+     * This data is repeated on every row in Excel, so we only import it ONCE per municipality+year combination
+     * Returns true if data was imported, false if skipped (already in cache)
+     */
+    private boolean processMunicipalityYearData(Row row, Municipality municipality, Integer year) {
+        // Create cache key: municipality_code + year
+        String cacheKey = municipality.getMunicipalityCode() + "-" + year;
+
+        // Check if we already imported this municipality+year combination
+        if (municipalityYearDataCache.containsKey(cacheKey)) {
+            // Already imported for this municipality and year - skip!
+            log.debug("Municipality year data already imported for {} year {}, skipping",
+                    municipality.getMunicipalityCode(), year);
+            return false;
+        }
+
+        log.info("🔵 Importing municipality year data for {} year {}",
+                municipality.getMunicipalityCode(), year);
+
+        // Use municipality code directly in the entity (new composite key structure)
+        MunicipalityYearData yearData = municipalityYearDataRepository
+                .findByMunicipalityCodeAndYear(municipality.getMunicipalityCode(), year)
+                .orElseGet(() -> MunicipalityYearData.builder()
+                        .municipalityCode(municipality.getMunicipalityCode())  // Part of composite key
+                        .municipality(municipality)  // Foreign key reference
+                        .year(year)  // Part of composite key
+                        .build());
+
+        // NSI 2022 - Personnel data (columns EH-EO: 137-144)
+        yearData.setTotalStaffCount(parseInteger(getCellValue(row, 137)));                     // Column EH
+        yearData.setStaffHigherEducationCount(parseInteger(getCellValue(row, 138)));           // Column EI
+        yearData.setStaffSecondaryEducationCount(parseInteger(getCellValue(row, 139)));        // Column EJ
+        yearData.setSecretariesCount(parseInteger(getCellValue(row, 143)));                    // Column EN
+        yearData.setSecretariesHigherEducationCount(parseInteger(getCellValue(row, 144)));     // Column EO
+
+        // NSI 2022 - Financial data (columns ER-EW: 147-152)
+        yearData.setTotalRevenueThousands(parseBigDecimal(getCellValue(row, 147)));            // Column ER
+        yearData.setRevenueFromSubsidiesThousands(parseBigDecimal(getCellValue(row, 148)));    // Column ES
+        yearData.setRevenueFromRentThousands(parseBigDecimal(getCellValue(row, 149)));         // Column ET
+        yearData.setTotalExpensesThousands(parseBigDecimal(getCellValue(row, 150)));           // Column EU
+        yearData.setExpensesSalariesThousands(parseBigDecimal(getCellValue(row, 151)));        // Column EV
+        yearData.setExpensesSocialSecurityThousands(parseBigDecimal(getCellValue(row, 152)));  // Column EW
+
+        // NAP 2023 data (columns EY-EZ: 154-155)
+        yearData.setAverageInsuranceIncome(parseBigDecimal(getCellValue(row, 154)));           // Column EY
+        yearData.setUniqueEmploymentContracts(parseInteger(getCellValue(row, 155)));           // Column EZ
+
+        // Subsidies (columns FA-FB: 156-157)
+        yearData.setSubsidizedPositions(parseInteger(getCellValue(row, 156)));                 // Column FA
+        yearData.setAdditionalPositions(parseInteger(getCellValue(row, 157)));                 // Column FB
+
+        // Economic indicators (columns FC-FJ: 158-165)
+        yearData.setUnemploymentRate(parseDouble(getCellValue(row, 158)));                     // Column FC
+        yearData.setUnemploymentRate1529(parseDouble(getCellValue(row, 159)));                 // Column FD
+        yearData.setGrossWageMonthly(parseDouble(getCellValue(row, 160)));                     // Column FE
+        yearData.setGrossValueAddedPerPerson(parseDouble(getCellValue(row, 161)));             // Column FF
+        yearData.setCompaniesNumber(parseInteger(getCellValue(row, 162)));                     // Column FG
+        yearData.setCompaniesPerCapita(parseDouble(getCellValue(row, 163)));                   // Column FH
+        yearData.setEmploymentRate(parseDouble(getCellValue(row, 164)));                       // Column FI
+        yearData.setUrbanPopulationPercent(parseDouble(getCellValue(row, 165)));               // Column FJ
+
+        // Education and infrastructure (columns FQ-FW: 172-178)
+        yearData.setStudentsNumber(parseInteger(getCellValue(row, 172)));                      // Column FQ
+        yearData.setStudentsPer1000(parseDouble(getCellValue(row, 173)));                      // Column FR
+        yearData.setKidsKindergartens(parseInteger(getCellValue(row, 176)));                   // Column FU
+        yearData.setHospitals(parseInteger(getCellValue(row, 177)));                           // Column FV (only 2022)
+        yearData.setPoorHealth(parseDouble(getCellValue(row, 178)));                           // Column FW (only 2021)
+
+        municipalityYearDataRepository.save(yearData);
+
+        // Add to cache to prevent re-importing the same municipality+year
+        municipalityYearDataCache.put(cacheKey, true);
+        log.info("✅ Saved and cached municipality year data for {}", cacheKey);
+
+        return true;
+    }
+
+    /**
+     * Calculate metrics for all municipalities
+     */
+    private void calculateAllMetrics() {
+        List<Municipality> municipalities = municipalityRepository.findAll();
+        int count = 0;
+
+        for (Municipality municipality : municipalities) {
+            try {
+                metricsService.calculateAndSaveMetrics(municipality);
+                count++;
+            } catch (Exception e) {
+                log.error("Error calculating metrics for municipality: {}",
+                        municipality.getMunicipalityCode(), e);
+            }
+        }
+
+        log.info("Calculated metrics for {} municipalities", count);
+    }
+
+    /**
+     * Helper method to get cell value as string
+     */
+    private String getCellValue(Row row, int columnIndex) {
+        Cell cell = row.getCell(columnIndex);
+        if (cell == null) return null;
+
+        return switch (cell.getCellType()) {
+            case STRING -> cell.getStringCellValue();
+            case NUMERIC -> String.valueOf(cell.getNumericCellValue());
+            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
+            case FORMULA -> cell.getCellFormula();
+            default -> null;
+        };
+    }
+
+    /**
+     * Parse integer from string
+     */
+    private Integer parseInteger(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            try {
+                return (int) Double.parseDouble(value.trim());
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Parse double from string
+     */
+    private Double parseDouble(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException e) {
             return null;
         }
     }
 
-    private Double getDoubleValue(Row row, int cellIndex) {
-        Cell cell = row.getCell(cellIndex);
-        if (cell == null) {
-            return null;
-        }
-
+    /**
+     * Parse BigDecimal from string
+     */
+    private BigDecimal parseBigDecimal(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
         try {
-            switch (cell.getCellType()) {
-                case NUMERIC:
-                    return cell.getNumericCellValue();
-                case STRING:
-                    String strValue = cell.getStringCellValue().trim();
-                    if (strValue.isEmpty()) {
-                        return null;
-                    }
-                    return Double.parseDouble(strValue);
-                case FORMULA:
-                    return cell.getNumericCellValue();
-                default:
-                    return null;
-            }
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private BigDecimal getBigDecimalValue(Row row, int cellIndex) {
-        Cell cell = row.getCell(cellIndex);
-        if (cell == null) {
-            return null;
-        }
-
-        try {
-            switch (cell.getCellType()) {
-                case NUMERIC:
-                    return BigDecimal.valueOf(cell.getNumericCellValue());
-                case STRING:
-                    String strValue = cell.getStringCellValue().trim();
-                    if (strValue.isEmpty()) {
-                        return null;
-                    }
-                    return new BigDecimal(strValue);
-                case FORMULA:
-                    return BigDecimal.valueOf(cell.getNumericCellValue());
-                default:
-                    return null;
-            }
-        } catch (Exception e) {
+            return new BigDecimal(value.trim());
+        } catch (NumberFormatException e) {
             return null;
         }
     }

@@ -5,11 +5,17 @@ import bg.chitalishte.entity.Chitalishte;
 import bg.chitalishte.entity.ChitalishteYearData;
 import org.springframework.stereotype.Component;
 
+/**
+ * Mapper for Chitalishte entity to ChitalishteDTO
+ * Maps data from new entity structure to existing DTO (no FE changes needed)
+ */
 @Component
 public class ChitalishteMapper {
 
     public ChitalishteDTO toDTO(Chitalishte entity) {
-        if (entity == null) return null;
+        if (entity == null) {
+            return null;
+        }
 
         ChitalishteYearData latestData = entity.getLatestYearData();
 

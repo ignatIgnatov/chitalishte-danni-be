@@ -4,11 +4,17 @@ import bg.chitalishte.dto.MunicipalityDTO;
 import bg.chitalishte.entity.Municipality;
 import org.springframework.stereotype.Component;
 
+/**
+ * Mapper for Municipality entity to MunicipalityDTO
+ * Maps data from new entity structure to existing DTO (no FE changes needed)
+ */
 @Component
 public class MunicipalityMapper {
 
     public MunicipalityDTO toDTO(Municipality entity) {
-        if (entity == null) return null;
+        if (entity == null) {
+            return null;
+        }
 
         return MunicipalityDTO.builder()
                 .id(entity.getId())

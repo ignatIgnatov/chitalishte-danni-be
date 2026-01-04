@@ -1,14 +1,11 @@
 package bg.chitalishte.service;
 
 import bg.chitalishte.dto.MunicipalityMetricsDTO;
-import bg.chitalishte.entity.Chitalishte;
-import bg.chitalishte.entity.ChitalishteYearData;
 import bg.chitalishte.entity.Municipality;
 import bg.chitalishte.entity.MunicipalityMetrics;
+import bg.chitalishte.entity.MunicipalityYearData;
 import bg.chitalishte.mapper.MunicipalityMetricsMapper;
-import bg.chitalishte.repository.ChitalishteRepository;
-import bg.chitalishte.repository.MunicipalityMetricsRepository;
-import bg.chitalishte.repository.MunicipalityRepository;
+import bg.chitalishte.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,324 +16,332 @@ import java.math.RoundingMode;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Service for calculating and managing municipality metrics
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class MunicipalityMetricsService {
 
-    private final MunicipalityRepository municipalityRepository;
-    private final ChitalishteRepository chitalishteRepository;
     private final MunicipalityMetricsRepository metricsRepository;
-    private final MunicipalityMetricsMapper municipalityMetricsMapper;
+    private final MunicipalityYearDataRepository yearDataRepository;
+    private final ChitalishteRepository chitalishteRepository;
+    private final ChitalishteYearDataRepository chitalishteYearDataRepository;
+    private final MunicipalityRepository municipalityRepository;
+    private final MunicipalityMetricsMapper metricsMapper;
 
     private static final BigDecimal SUBSIDY_PER_POSITION = new BigDecimal("19555");
-    private static final BigDecimal HUNDRED = new BigDecimal("100");
-    private static final BigDecimal THOUSAND = new BigDecimal("1000");
-    private static final BigDecimal TEN_THOUSAND = new BigDecimal("10000");
+    private static final int REFERENCE_YEAR_NSI = 2022;
+    private static final int REFERENCE_YEAR_NAP = 2023;
+    private static final int REFERENCE_YEAR_REGISTRY = 2023;
 
+    /**
+     * Calculate and save metrics for a municipality
+     */
+    @Transactional
+    public MunicipalityMetrics calculateAndSaveMetrics(Municipality municipality) {
+        log.info("Calculating metrics for municipality: {}", municipality.getMunicipalityCode());
+
+        MunicipalityMetrics metrics = metricsRepository.findByMunicipality(municipality)
+                .orElse(MunicipalityMetrics.builder()
+                        .municipality(municipality)
+                        .build());
+
+        // Get year data for calculations
+        MunicipalityYearData nsiData = getYearData(municipality, REFERENCE_YEAR_NSI);
+        MunicipalityYearData napData = getYearData(municipality, REFERENCE_YEAR_NAP);
+        MunicipalityYearData subsidyData = getLatestYearData(municipality);
+
+        // Calculate basic information
+        calculateBasicInfo(metrics, municipality, subsidyData);
+
+        // Calculate revenue and expenses
+        calculateRevenueAndExpenses(metrics, nsiData);
+
+        // Calculate personnel metrics
+        calculatePersonnelMetrics(metrics, nsiData, napData);
+
+        // Calculate population-based metrics
+        calculatePopulationMetrics(metrics, municipality, subsidyData);
+
+        MunicipalityMetrics saved = metricsRepository.save(metrics);
+        log.info("Metrics calculated and saved for municipality: {}", municipality.getMunicipalityCode());
+
+        return saved;
+    }
+
+    /**
+     * Calculate metrics for all municipalities
+     */
     @Transactional
     public void calculateAllMetrics() {
-        log.info("🚀 Започване на изчисляване на показатели...");
+        log.info("Starting calculation of metrics for all municipalities");
 
         List<Municipality> municipalities = municipalityRepository.findAll();
         int successCount = 0;
-        int updateCount = 0;
-        int insertCount = 0;
+        int errorCount = 0;
 
         for (Municipality municipality : municipalities) {
             try {
-                // Проверка дали вече съществува запис
-                Optional<MunicipalityMetrics> existingMetrics =
-                        metricsRepository.findByMunicipalityId(municipality.getId());
-
-                MunicipalityMetrics metrics;
-
-                if (existingMetrics.isPresent()) {
-                    // UPDATE съществуващ запис
-                    metrics = existingMetrics.get();
-                    updateMetrics(metrics, municipality);
-                    updateCount++;
-                    log.debug("🔄 Актуализирани показатели за {}", municipality.getMunicipality());
-                } else {
-                    // INSERT нов запис
-                    metrics = calculateMetricsForMunicipality(municipality);
-                    insertCount++;
-                    log.debug("✨ Създадени показатели за {}", municipality.getMunicipality());
-                }
-
-                metricsRepository.save(metrics);
+                calculateAndSaveMetrics(municipality);
                 successCount++;
 
+                if (successCount % 50 == 0) {
+                    log.info("Calculated metrics for {} municipalities", successCount);
+                }
             } catch (Exception e) {
-                log.error("❌ Грешка при изчисляване за {}: {}",
-                        municipality.getMunicipality(), e.getMessage());
+                errorCount++;
+                log.error("Error calculating metrics for municipality: {}",
+                        municipality.getMunicipalityCode(), e);
             }
         }
 
-        log.info("✅ Изчислени показатели за {} общини (нови: {}, актуализирани: {})",
-                successCount, insertCount, updateCount);
+        log.info("Metrics calculation completed: success={}, errors={}, total={}",
+                successCount, errorCount, municipalities.size());
     }
 
+    /**
+     * Get metrics DTO for municipality by code
+     */
     @Transactional(readOnly = true)
     public Optional<MunicipalityMetricsDTO> getMetrics(String municipalityCode) {
         log.info("Fetching metrics for municipality: {}", municipalityCode);
 
-        return metricsRepository.findByMunicipalityMunicipalityCode(municipalityCode)
-                .map(municipalityMetricsMapper::toDTO);
+        return metricsRepository.findByMunicipalityCode(municipalityCode)
+                .map(metricsMapper::toDTO);
     }
 
     /**
-     * Актуализира съществуващ MunicipalityMetrics запис
+     * Calculate basic information (6 indicators)
      */
-    private void updateMetrics(MunicipalityMetrics metrics, Municipality municipality) {
-        List<Chitalishte> chitalishta = chitalishteRepository
-                .findByMunicipalityId(municipality.getId());
+    private void calculateBasicInfo(MunicipalityMetrics metrics, Municipality municipality, MunicipalityYearData subsidyData) {
+        String municipalityCode = municipality.getMunicipalityCode();
 
-        // === ОСНОВНА ИНФОРМАЦИЯ ===
-        metrics.setTotalChitalishta(chitalishta.size());
+        // Total chitalishta
+        metrics.setTotalChitalishta(municipality.getTotalChitalishta());
 
-        long villageCount = chitalishta.stream()
-                .filter(c -> "село".equalsIgnoreCase(c.getVillageCity()))
-                .count();
-        long cityCount = chitalishta.stream()
-                .filter(c -> "град".equalsIgnoreCase(c.getVillageCity()))
-                .count();
+        // Village chitalishta
+        Long village = chitalishteRepository.countVillageChitalishta(municipalityCode);
+        metrics.setVillageChitalishta(village.intValue());
 
-        metrics.setVillageChitalishta((int) villageCount);
-        metrics.setCityChitalishta((int) cityCount);
+        // City chitalishta
+        Long city = chitalishteRepository.countCityChitalishta(municipalityCode);
+        metrics.setCityChitalishta(city.intValue());
 
-        // Останалите изчисления са същите като в calculateMetricsForMunicipality
-        calculateSubsidies(metrics, municipality);
-        calculateRevenueAndExpenses(metrics, municipality);
-        calculateStaff(metrics, municipality);
-        calculateTraining(metrics, chitalishta);
-        calculatePopulationMetrics(metrics, municipality, chitalishta);
-    }
-
-    /**
-     * Създава нов MunicipalityMetrics запис
-     */
-    private MunicipalityMetrics calculateMetricsForMunicipality(Municipality municipality) {
-        List<Chitalishte> chitalishta = chitalishteRepository
-                .findByMunicipalityId(municipality.getId());
-
-        MunicipalityMetrics metrics = MunicipalityMetrics.builder()
-                .municipality(municipality)
-                .build();
-
-        // === ОСНОВНА ИНФОРМАЦИЯ ===
-        metrics.setTotalChitalishta(chitalishta.size());
-
-        long villageCount = chitalishta.stream()
-                .filter(c -> "село".equalsIgnoreCase(c.getVillageCity()))
-                .count();
-        long cityCount = chitalishta.stream()
-                .filter(c -> "град".equalsIgnoreCase(c.getVillageCity()))
-                .count();
-
-        metrics.setVillageChitalishta((int) villageCount);
-        metrics.setCityChitalishta((int) cityCount);
-
-        calculateSubsidies(metrics, municipality);
-        calculateRevenueAndExpenses(metrics, municipality);
-        calculateStaff(metrics, municipality);
-        calculateTraining(metrics, chitalishta);
-        calculatePopulationMetrics(metrics, municipality, chitalishta);
-
-        return metrics;
-    }
-
-    private void calculateSubsidies(MunicipalityMetrics metrics, Municipality municipality) {
-        // Държавна субсидия (FA × 19,555)
-        if (municipality.getSubsidizedPositions() != null) {
-            BigDecimal subsidy = BigDecimal.valueOf(municipality.getSubsidizedPositions())
+        if (subsidyData != null && subsidyData.getSubsidizedPositions() != null) {
+            // State subsidy amount: FA × 19,555
+            BigDecimal subsidyAmount = new BigDecimal(subsidyData.getSubsidizedPositions())
                     .multiply(SUBSIDY_PER_POSITION);
-            metrics.setStateSubsidyAmount(subsidy);
+            metrics.setStateSubsidyAmount(subsidyAmount);
 
-            // Държавна субсидия на човек
-            if (municipality.getMunicipalityPopulation() != null &&
-                    municipality.getMunicipalityPopulation() > 0) {
-                BigDecimal perCapita = subsidy
-                        .divide(BigDecimal.valueOf(municipality.getMunicipalityPopulation()),
-                                2, RoundingMode.HALF_UP);
+            // State subsidy per capita: (FA × 19,555) / DS
+            if (municipality.getMunicipalityPopulation() != null && municipality.getMunicipalityPopulation() > 0) {
+                BigDecimal perCapita = subsidyAmount
+                        .divide(new BigDecimal(municipality.getMunicipalityPopulation()), 2, RoundingMode.HALF_UP);
                 metrics.setStateSubsidyPerCapita(perCapita);
             }
-        }
 
-        if (municipality.getAdditionalPositions() != null) {
-            metrics.setAdditionalPositions(BigDecimal.valueOf(municipality.getAdditionalPositions()));
+            // Additional positions
+            metrics.setAdditionalPositions(subsidyData.getAdditionalPositions());
         }
     }
 
-    private void calculateRevenueAndExpenses(MunicipalityMetrics metrics, Municipality municipality) {
-        BigDecimal totalRevenue = municipality.getTotalRevenueThousands();
-        BigDecimal totalExpenses = municipality.getTotalExpensesThousands();
+    /**
+     * Calculate revenue and expenses (5 indicators)
+     */
+    private void calculateRevenueAndExpenses(MunicipalityMetrics metrics, MunicipalityYearData nsiData) {
+        if (nsiData == null) {
+            return;
+        }
+
+        BigDecimal totalRevenue = nsiData.getTotalRevenueThousands();
+        BigDecimal subsidyRevenue = nsiData.getRevenueFromSubsidiesThousands();
+        BigDecimal rentRevenue = nsiData.getRevenueFromRentThousands();
+        BigDecimal totalExpenses = nsiData.getTotalExpensesThousands();
+        BigDecimal salariesExpenses = nsiData.getExpensesSalariesThousands();
+        BigDecimal socialSecurityExpenses = nsiData.getExpensesSocialSecurityThousands();
 
         if (totalRevenue != null && totalRevenue.compareTo(BigDecimal.ZERO) > 0) {
-            // % приходи от субсидии
-            if (municipality.getRevenueFromSubsidiesThousands() != null) {
-                BigDecimal percent = municipality.getRevenueFromSubsidiesThousands()
-                        .divide(totalRevenue, 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setRevenueFromSubsidiesPercent(percent);
+            // Revenue from subsidies %: (ES / ER) × 100
+            if (subsidyRevenue != null) {
+                BigDecimal percent = subsidyRevenue.divide(totalRevenue, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("100"));
+                metrics.setRevenueFromSubsidiesPercent(percent.setScale(2, RoundingMode.HALF_UP));
             }
 
-            // % приходи от наеми
-            if (municipality.getRevenueFromRentThousands() != null) {
-                BigDecimal percent = municipality.getRevenueFromRentThousands()
-                        .divide(totalRevenue, 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setRevenueFromRentPercent(percent);
+            // Revenue from rent %: (ET / ER) × 100
+            if (rentRevenue != null) {
+                BigDecimal percent = rentRevenue.divide(totalRevenue, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("100"));
+                metrics.setRevenueFromRentPercent(percent.setScale(2, RoundingMode.HALF_UP));
             }
 
-            // % приходи от други
-            if (municipality.getRevenueFromSubsidiesThousands() != null &&
-                    municipality.getRevenueFromRentThousands() != null) {
-                BigDecimal subsidiesAndRent = municipality.getRevenueFromSubsidiesThousands()
-                        .add(municipality.getRevenueFromRentThousands());
-                BigDecimal otherRevenue = totalRevenue.subtract(subsidiesAndRent);
-                BigDecimal percent = otherRevenue
-                        .divide(totalRevenue, 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setRevenueFromOtherPercent(percent);
+            // Revenue from other %: ((ER - (ES + ET)) / ER) × 100
+            if (subsidyRevenue != null && rentRevenue != null) {
+                BigDecimal otherRevenue = totalRevenue.subtract(subsidyRevenue).subtract(rentRevenue);
+                BigDecimal percent = otherRevenue.divide(totalRevenue, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("100"));
+                metrics.setRevenueFromOtherPercent(percent.setScale(2, RoundingMode.HALF_UP));
             }
         }
 
         if (totalExpenses != null && totalExpenses.compareTo(BigDecimal.ZERO) > 0) {
-            // % разходи за заплати
-            if (municipality.getExpensesSalariesThousands() != null &&
-                    municipality.getExpensesSocialSecurityThousands() != null) {
-                BigDecimal salariesAndSocial = municipality.getExpensesSalariesThousands()
-                        .add(municipality.getExpensesSocialSecurityThousands());
-                BigDecimal percent = salariesAndSocial
-                        .divide(totalExpenses, 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setExpensesForSalariesPercent(percent);
+            // Expenses for salaries %: ((EV + EW) / EU) × 100
+            if (salariesExpenses != null && socialSecurityExpenses != null) {
+                BigDecimal totalSalaries = salariesExpenses.add(socialSecurityExpenses);
+                BigDecimal percent = totalSalaries.divide(totalExpenses, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("100"));
+                metrics.setExpensesForSalariesPercent(percent.setScale(2, RoundingMode.HALF_UP));
+            }
 
-                // % други разходи
-                BigDecimal otherExpenses = totalExpenses.subtract(salariesAndSocial);
-                BigDecimal percentOther = otherExpenses
-                        .divide(totalExpenses, 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setExpensesOtherPercent(percentOther);
+            // Other expenses %: ((EU - (EV + EW)) / EU) × 100
+            if (salariesExpenses != null && socialSecurityExpenses != null) {
+                BigDecimal totalSalaries = salariesExpenses.add(socialSecurityExpenses);
+                BigDecimal otherExpenses = totalExpenses.subtract(totalSalaries);
+                BigDecimal percent = otherExpenses.divide(totalExpenses, 4, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("100"));
+                metrics.setExpensesOtherPercent(percent.setScale(2, RoundingMode.HALF_UP));
             }
         }
     }
 
-    private void calculateStaff(MunicipalityMetrics metrics, Municipality municipality) {
-        metrics.setTotalStaff(municipality.getTotalStaffCount());
-        metrics.setUniqueEmploymentContracts(municipality.getUniqueEmploymentContracts());
-
-        if (municipality.getTotalStaffCount() != null && municipality.getTotalStaffCount() > 0) {
-            // % с висше
-            if (municipality.getStaffHigherEducationCount() != null) {
-                BigDecimal percent = BigDecimal.valueOf(municipality.getStaffHigherEducationCount())
-                        .divide(BigDecimal.valueOf(municipality.getTotalStaffCount()), 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setStaffHigherEducationPercent(percent);
-            }
-
-            // % със средно
-            if (municipality.getStaffSecondaryEducationCount() != null) {
-                BigDecimal percent = BigDecimal.valueOf(municipality.getStaffSecondaryEducationCount())
-                        .divide(BigDecimal.valueOf(municipality.getTotalStaffCount()), 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setStaffSecondaryEducationPercent(percent);
-            }
+    /**
+     * Calculate personnel metrics (8 indicators)
+     */
+    private void calculatePersonnelMetrics(MunicipalityMetrics metrics, MunicipalityYearData nsiData, MunicipalityYearData napData) {
+        if (nsiData == null) {
+            return;
         }
 
-        metrics.setSecretariesCount(municipality.getSecretariesCount());
+        // Total staff (NSI 2022)
+        metrics.setTotalStaff(nsiData.getTotalStaffCount());
 
-        if (municipality.getSecretariesCount() != null && municipality.getSecretariesCount() > 0) {
-            if (municipality.getSecretariesHigherEducationCount() != null) {
-                BigDecimal percent = BigDecimal.valueOf(municipality.getSecretariesHigherEducationCount())
-                        .divide(BigDecimal.valueOf(municipality.getSecretariesCount()), 4, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
-                metrics.setSecretariesHigherEducationPercent(percent);
-            }
+        Integer totalStaff = nsiData.getTotalStaffCount();
+        Integer higherEdu = nsiData.getStaffHigherEducationCount();
+        Integer secondaryEdu = nsiData.getStaffSecondaryEducationCount();
+        Integer secretaries = nsiData.getSecretariesCount();
+        Integer secretariesHigherEdu = nsiData.getSecretariesHigherEducationCount();
+
+        // Staff higher education %: (EI / EH) × 100
+        if (totalStaff != null && totalStaff > 0 && higherEdu != null) {
+            BigDecimal percent = new BigDecimal(higherEdu)
+                    .divide(new BigDecimal(totalStaff), 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"));
+            metrics.setStaffHigherEducationPercent(percent.setScale(2, RoundingMode.HALF_UP));
         }
 
-        metrics.setAverageInsuranceIncome(municipality.getAverageInsuranceIncomeTd());
+        // Staff secondary education %: (EJ / EH) × 100
+        if (totalStaff != null && totalStaff > 0 && secondaryEdu != null) {
+            BigDecimal percent = new BigDecimal(secondaryEdu)
+                    .divide(new BigDecimal(totalStaff), 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"));
+            metrics.setStaffSecondaryEducationPercent(percent.setScale(2, RoundingMode.HALF_UP));
+        }
+
+        // Secretaries count
+        metrics.setSecretariesCount(secretaries);
+
+        // Secretaries higher education %: (EO / EN) × 100
+        if (secretaries != null && secretaries > 0 && secretariesHigherEdu != null) {
+            BigDecimal percent = new BigDecimal(secretariesHigherEdu)
+                    .divide(new BigDecimal(secretaries), 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"));
+            metrics.setSecretariesHigherEducationPercent(percent.setScale(2, RoundingMode.HALF_UP));
+        }
+
+        // NAP 2023 data
+        if (napData != null) {
+            metrics.setAverageInsuranceIncome(napData.getAverageInsuranceIncome());
+            metrics.setUniqueEmploymentContracts(napData.getUniqueEmploymentContracts());
+        }
+
+        // Chitalishta with no training %: (COUNT where CX=0 / V) × 100
+        Long noTraining = chitalishteYearDataRepository.countChitalishtaWithNoTraining(
+                metrics.getMunicipality().getMunicipalityCode(), REFERENCE_YEAR_REGISTRY);
+        Integer totalChitalishta = metrics.getTotalChitalishta();
+
+        if (totalChitalishta != null && totalChitalishta > 0) {
+            BigDecimal percent = new BigDecimal(noTraining)
+                    .divide(new BigDecimal(totalChitalishta), 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"));
+            metrics.setChitalishtaNoTrainingPercent(percent.setScale(2, RoundingMode.HALF_UP));
+        }
     }
 
-    private void calculateTraining(MunicipalityMetrics metrics, List<Chitalishte> chitalishta) {
-        // % читалища без обучение (CX=0 / V × 100)
-        if (chitalishta.size() > 0) {
-            long noTrainingCount = chitalishta.stream()
-                    .filter(c -> {
-                        ChitalishteYearData latestData = c.getLatestYearData();
-                        if (latestData == null) return false;
-                        Integer training = latestData.getTrainingParticipation();
-                        return training == null || training == 0;
-                    })
-                    .count();
+    /**
+     * Calculate population-based metrics (5 indicators)
+     */
+    private void calculatePopulationMetrics(MunicipalityMetrics metrics, Municipality municipality, MunicipalityYearData yearData) {
+        Integer totalChitalishta = metrics.getTotalChitalishta();
+        Integer population = municipality.getMunicipalityPopulation();
 
-            BigDecimal percent = BigDecimal.valueOf(noTrainingCount)
-                    .divide(BigDecimal.valueOf(chitalishta.size()), 4, RoundingMode.HALF_UP)
-                    .multiply(HUNDRED)
-                    .setScale(2, RoundingMode.HALF_UP);
-            metrics.setChitalishtaNoTrainingPercent(percent);
+        if (totalChitalishta == null || totalChitalishta == 0) {
+            return;
+        }
+
+        BigDecimal chitalishtaCount = new BigDecimal(totalChitalishta);
+
+        // Chitalishta per 10k residents: (V / DS) × 10,000
+        if (population != null && population > 0) {
+            BigDecimal per10k = chitalishtaCount
+                    .divide(new BigDecimal(population), 5, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("10000"));
+            metrics.setChitalishtaPer10kResidents(per10k.setScale(1, RoundingMode.HALF_UP));
+        }
+
+        // Chitalishta per 1k children under 15: (V / DT) × 1,000
+        Integer childrenUnder15 = municipality.getPopulationUnder15Aggregate();
+        if (childrenUnder15 != null && childrenUnder15 > 0) {
+            BigDecimal per1k = chitalishtaCount
+                    .divide(new BigDecimal(childrenUnder15), 5, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("1000"));
+            metrics.setChitalishtaPer1kChildrenUnder15(per1k.setScale(1, RoundingMode.HALF_UP));
+        }
+
+        // Chitalishta per 1k elderly (65+): (V / DV) × 1,000
+        Integer elderly = municipality.getPopulationOver65Aggregate();
+        if (elderly != null && elderly > 0) {
+            BigDecimal per1k = chitalishtaCount
+                    .divide(new BigDecimal(elderly), 5, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("1000"));
+            metrics.setChitalishtaPer1kElderly(per1k.setScale(1, RoundingMode.HALF_UP));
+        }
+
+        if (yearData != null) {
+            // Chitalishta per 1k students: (V / FU) × 1,000
+            if (yearData.getStudentsNumber() != null && yearData.getStudentsNumber() > 0) {
+                BigDecimal per1k = chitalishtaCount
+                        .divide(new BigDecimal(yearData.getStudentsNumber()), 5, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("1000"));
+                metrics.setChitalishtaPer1kStudents(per1k.setScale(1, RoundingMode.HALF_UP));
+            }
+
+            // Chitalishta per 1k kindergarten: (V / FY) × 1,000
+            if (yearData.getKidsKindergartens() != null && yearData.getKidsKindergartens() > 0) {
+                BigDecimal per1k = chitalishtaCount
+                        .divide(new BigDecimal(yearData.getKidsKindergartens()), 5, RoundingMode.HALF_UP)
+                        .multiply(new BigDecimal("1000"));
+                metrics.setChitalishtaPer1kKindergarten(per1k.setScale(1, RoundingMode.HALF_UP));
+            }
         }
     }
 
-    private void calculatePopulationMetrics(MunicipalityMetrics metrics, Municipality municipality,
-                                            List<Chitalishte> chitalishta) {
-        // Читалища на 10,000 жители
-        if (municipality.getMunicipalityPopulation() != null &&
-                municipality.getMunicipalityPopulation() > 0) {
-            BigDecimal chitalishtaPer10k = BigDecimal.valueOf(chitalishta.size())
-                    .multiply(TEN_THOUSAND)
-                    .divide(BigDecimal.valueOf(municipality.getMunicipalityPopulation()),
-                            1, RoundingMode.HALF_UP);
-            metrics.setChitalishtaPer10kResidents(chitalishtaPer10k);
-        }
+    /**
+     * Get year data for specific year
+     */
+    private MunicipalityYearData getYearData(Municipality municipality, int year) {
+        return yearDataRepository.findByMunicipalityCodeAndYear(
+                municipality.getMunicipalityCode(), year).orElse(null);
+    }
 
-        // Читалища на 1,000 деца под 15
-        if (municipality.getPopulationUnder15() != null &&
-                municipality.getPopulationUnder15() > 0) {
-            BigDecimal chitalishtaPer1kChildren = BigDecimal.valueOf(chitalishta.size())
-                    .multiply(THOUSAND)
-                    .divide(BigDecimal.valueOf(municipality.getPopulationUnder15()),
-                            1, RoundingMode.HALF_UP);
-            metrics.setChitalishtaPer1kChildrenUnder15(chitalishtaPer1kChildren);
-        }
-
-        // Читалища на 1,000 ученици
-        if (municipality.getStudentsNumber() != null &&
-                municipality.getStudentsNumber() > 0) {
-            BigDecimal chitalishtaPer1kStudents = BigDecimal.valueOf(chitalishta.size())
-                    .multiply(THOUSAND)
-                    .divide(BigDecimal.valueOf(municipality.getStudentsNumber()),
-                            1, RoundingMode.HALF_UP);
-            metrics.setChitalishtaPer1kStudents(chitalishtaPer1kStudents);
-        }
-
-        // Читалища на 1,000 деца в детски градини
-        if (municipality.getKidsKindergartens() != null &&
-                municipality.getKidsKindergartens() > 0) {
-            BigDecimal chitalishtaPer1kKindergarten = BigDecimal.valueOf(chitalishta.size())
-                    .multiply(THOUSAND)
-                    .divide(BigDecimal.valueOf(municipality.getKidsKindergartens()),
-                            1, RoundingMode.HALF_UP);
-            metrics.setChitalishtaPer1kKindergarten(chitalishtaPer1kKindergarten);
-        }
-
-        // Читалища на 1,000 жители 65+
-        if (municipality.getPopulationOver65() != null &&
-                municipality.getPopulationOver65() > 0) {
-            BigDecimal chitalishtaPer1kElderly = BigDecimal.valueOf(chitalishta.size())
-                    .multiply(THOUSAND)
-                    .divide(BigDecimal.valueOf(municipality.getPopulationOver65()),
-                            1, RoundingMode.HALF_UP);
-            metrics.setChitalishtaPer1kElderly(chitalishtaPer1kElderly);
-        }
+    /**
+     * Get latest year data
+     */
+    private MunicipalityYearData getLatestYearData(Municipality municipality) {
+        return yearDataRepository.findLatestByMunicipalityCode(
+                        municipality.getMunicipalityCode()).stream()
+                .findFirst()
+                .orElse(null);
     }
 }

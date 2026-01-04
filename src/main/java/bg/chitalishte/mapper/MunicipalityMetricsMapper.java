@@ -4,11 +4,19 @@ import bg.chitalishte.dto.MunicipalityMetricsDTO;
 import bg.chitalishte.entity.MunicipalityMetrics;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+
+/**
+ * Mapper for MunicipalityMetrics entity to MunicipalityMetricsDTO
+ * Maps data from new entity structure to existing DTO (no FE changes needed)
+ */
 @Component
 public class MunicipalityMetricsMapper {
 
     public MunicipalityMetricsDTO toDTO(MunicipalityMetrics entity) {
-        if (entity == null) return null;
+        if (entity == null) {
+            return null;
+        }
 
         return MunicipalityMetricsDTO.builder()
                 .id(entity.getId())
@@ -19,7 +27,7 @@ public class MunicipalityMetricsMapper {
                 .cityChitalishta(entity.getCityChitalishta())
                 .stateSubsidyAmount(entity.getStateSubsidyAmount())
                 .stateSubsidyPerCapita(entity.getStateSubsidyPerCapita())
-                .additionalPositions(entity.getAdditionalPositions())
+                .additionalPositions(BigDecimal.valueOf(entity.getAdditionalPositions()))
                 .revenueFromSubsidiesPercent(entity.getRevenueFromSubsidiesPercent())
                 .revenueFromRentPercent(entity.getRevenueFromRentPercent())
                 .revenueFromOtherPercent(entity.getRevenueFromOtherPercent())

@@ -1,43 +1,55 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: chitalishte-danni-db
+  chitalishte-app:
+    build: .
+    container_name: chitalishte-danni
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      # === CRITICAL: Java Heap Settings ===
+      # Increase heap size to prevent OutOfMemoryError during import
+      JAVA_OPTS: "-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+
+      # Database connection
+      DB_HOST: chitalishte-db
+      DB_PORT: 5432
+      DB_NAME: chitalishta_danni_db
+      DB_USERNAME: chitalishta_danni_db_user
+      DB_PASSWORD: chitalishta_danni_db_pass
+
+      # Server port
+      SERVER_PORT: 8080
+
+    depends_on:
+      chitalishte-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - chitalishte-network
+    volumes:
+      - ./geocoding-data:/app/geocoding-data
+
+  chitalishte-db:
+    image: postgres:14-alpine
+    container_name: chitalishte-db
     environment:
       POSTGRES_DB: chitalishta_danni_db
       POSTGRES_USER: chitalishta_danni_db_user
       POSTGRES_PASSWORD: chitalishta_danni_db_pass
+      # Increase PostgreSQL memory for large imports
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - chitalishte-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chitalishta_danni_db_user -d chitalishta_danni_db"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: chitalishte-danni
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: chitalishta_danni_db
-      DB_USERNAME: chitalishta_danni_db_user
-      DB_PASSWORD: chitalishta_danni_db_pass
-      SERVER_PORT: 8080
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    restart: unless-stopped
     networks:
       - chitalishte-network
-    restart: unless-stopped
 
 networks:
   chitalishte-network:
@@ -45,3 +57,4 @@ networks:
 
 volumes:
   postgres_data:
+    driver: local

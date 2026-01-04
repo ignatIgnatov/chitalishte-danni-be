@@ -7,410 +7,517 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import java.util.UUID;
 
+/**
+ * Year-dependent data for chitalishte (commercial register, registry, library data)
+ * Composite key: (reg_n, year)
+ */
 @Entity
-@Table(name = "chitalishte_year_data",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"chitalishte_id", "year"}))
+@Table(name = "chitalishte_year_data")
+@IdClass(ChitalishteYearDataId.class)
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class ChitalishteYearData {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+    // ========== COMPOSITE KEY ==========
 
-    // Връзка към читалище
+    @Id
+    @Column(name = "reg_n", length = 50, nullable = false)
+    private String regN;  // Part of composite key
+
+    @Id
+    @Column(name = "year", nullable = false)
+    private Integer year;  // Part of composite key
+
+    // ========== FOREIGN KEY RELATIONSHIP ==========
+
+    // Foreign key to chitalishte (not part of ID)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "chitalishte_id", nullable = false)
     private Chitalishte chitalishte;
 
-    // Година (колона 2)
-    @Column(name = "year", nullable = false)
-    private Integer year;
+    // ========== COMMERCIAL REGISTER - FINANCIAL DATA (columns X-BL) ==========
+
+    // Total expenditure
+    // Column X: total_expenditure
+    @Column(name = "total_expenditure", precision = 15, scale = 2)
+    private BigDecimal totalExpenditure;
+
+    // Accumulated profit
+    // Column Y: accumulated_profit
+    @Column(name = "accumulated_profit", precision = 15, scale = 2)
+    private BigDecimal accumulatedProfit;
+
+    // Profit
+    // Column Z: profit
+    @Column(name = "profit", precision = 15, scale = 2)
+    private BigDecimal profit;
+
+    // Operating income
+    // Column AA: operating_income
+    @Column(name = "operating_income", precision = 15, scale = 2)
+    private BigDecimal operatingIncome;
+
+    // Total income
+    // Column AB: total_income
+    @Column(name = "total_income", precision = 15, scale = 2)
+    private BigDecimal totalIncome;
+
+    // Accumulated loss
+    // Column AC: accumulated_loss
+    @Column(name = "accumulated_loss", precision = 15, scale = 2)
+    private BigDecimal accumulatedLoss;
+
+    // Loss
+    // Column AD: loss
+    @Column(name = "loss", precision = 15, scale = 2)
+    private BigDecimal loss;
+
+    // External services spending
+    // Column AE: external_services_spending
+    @Column(name = "external_services_spending", precision = 15, scale = 2)
+    private BigDecimal externalServicesSpending;
+
+    // Intangible assets
+    // Column AF: intangible_assets
+    @Column(name = "intangible_assets", precision = 15, scale = 2)
+    private BigDecimal intangibleAssets;
+
+    // Fixed assets
+    // Column AG: fixed_assets
+    @Column(name = "fixed_assets", precision = 15, scale = 2)
+    private BigDecimal fixedAssets;
+
+    // Material reserves
+    // Column AH: material_reserves
+    @Column(name = "material_reserves", precision = 15, scale = 2)
+    private BigDecimal materialReserves;
+
+    // Receivables
+    // Column AI: receivables
+    @Column(name = "receivables", precision = 15, scale = 2)
+    private BigDecimal receivables;
+
+    // Investment
+    // Column AJ: investment
+    @Column(name = "investment", precision = 15, scale = 2)
+    private BigDecimal investment;
+
+    // Cash
+    // Column AK: cash
+    @Column(name = "cash", precision = 15, scale = 2)
+    private BigDecimal cash;
+
+    // Current assets
+    // Column AL: current_assets
+    @Column(name = "current_assets", precision = 15, scale = 2)
+    private BigDecimal currentAssets;
+
+    // Total assets
+    // Column AM: total_assets
+    @Column(name = "total_assets", precision = 15, scale = 2)
+    private BigDecimal totalAssets;
+
+    // Equity
+    // Column AN: equity
+    @Column(name = "equity", precision = 15, scale = 2)
+    private BigDecimal equity;
+
+    // Liabilities
+    // Column AO: liabilities
+    @Column(name = "liabilities", precision = 15, scale = 2)
+    private BigDecimal liabilities;
+
+    // Short term liabilities
+    // Column AP: short_term_liabilities
+    @Column(name = "short_term_liabilities", precision = 15, scale = 2)
+    private BigDecimal shortTermLiabilities;
+
+    // Long term liabilities
+    // Column AQ: long_term_liabilities
+    @Column(name = "long_term_liabilities", precision = 15, scale = 2)
+    private BigDecimal longTermLiabilities;
 
-    // === РЪКОВОДСТВО (колони 64, 66, 67) ===
-    @Column(name = "chairman", length = 200)
-    private String chairman;  // 64
+    // ========== FINANCIAL RATIOS (columns AR-BL) ==========
 
-    @Column(name = "secretary", length = 200)
-    private String secretary;  // 66
-
-    @Column(name = "status", length = 50)
-    private String status;  // 67
-
-    // === ЧЛЕНСТВО (колони 68-71) ===
-    @Column(name = "total_members")
-    private Integer totalMembers;  // 68
-
-    @Column(name = "submitted_applications")
-    private Integer submittedApplications;  // 69
-
-    @Column(name = "newly_accepted_members")
-    private Integer newlyAcceptedMembers;  // 70
-
-    @Column(name = "rejected_applications")
-    private Integer rejectedApplications;  // 71
-
-    // === БИБЛИОТЕЧНА ДЕЙНОСТ (колона 72) ===
-    @Column(name = "library_activity", columnDefinition = "TEXT")
-    private String libraryActivity;  // 72
-
-    // === ДЕЙНОСТИ И КЛУБОВЕ (колони 75-93) ===
-    @Column(name = "art_clubs")
-    private Integer artClubs;  // 75
-
-    @Column(name = "art_clubs_text", columnDefinition = "TEXT")
-    private String artClubsText;  // 76
-
-    @Column(name = "language_schools")
-    private Integer languageSchools;  // 77
-
-    @Column(name = "language_schools_text", columnDefinition = "TEXT")
-    private String languageSchoolsText;  // 78
-
-    @Column(name = "local_history_clubs")
-    private Integer localHistoryClubs;  // 79
-
-    @Column(name = "local_history_clubs_text", columnDefinition = "TEXT")
-    private String localHistoryClubsText;  // 80
-
-    @Column(name = "museum_collections")
-    private Integer museumCollections;  // 81
-
-    @Column(name = "museum_collections_text", columnDefinition = "TEXT")
-    private String museumCollectionsText;  // 82
-
-    @Column(name = "folklore_groups")
-    private Integer folkloreGroups;  // 83
-
-    @Column(name = "theater_groups")
-    private Integer theaterGroups;  // 84
-
-    @Column(name = "dance_groups")
-    private Integer danceGroups;  // 85
-
-    @Column(name = "classical_modern_groups")
-    private Integer classicalModernGroups;  // 86
-
-    @Column(name = "vocal_groups")
-    private Integer vocalGroups;  // 87
-
-    @Column(name = "other_clubs")
-    private Integer otherClubs;  // 88
-
-    @Column(name = "event_participation")
-    private Integer eventParticipation;  // 89
-
-    @Column(name = "projects_independent")
-    private Integer projectsIndependent;  // 90
-
-    @Column(name = "projects_cooperation")
-    private Integer projectsCooperation;  // 91
-
-    @Column(name = "work_with_disabilities", columnDefinition = "TEXT")
-    private String workWithDisabilities;  // 92
-
-    @Column(name = "other_activities", columnDefinition = "TEXT")
-    private String otherActivities;  // 93
-
-    // === ПЕРСОНАЛ НА ЧИТАЛИЩЕТО (колони 94-102) ===
-    @Column(name = "subsidized_staff", precision = 10, scale = 2)
-    private BigDecimal subsidizedStaff;  // 94
-    // колона 95 е празна
-    @Column(name = "total_staff")
-    private Integer totalStaff;  // 96 - Общ персонал
-
-    @Column(name = "specialists_higher_education")
-    private Integer specialistsHigherEducation;  // 97 - Специалисти с висше
-
-    @Column(name = "specialized_positions")
-    private Integer specializedPositions;  // 98 - Специализирани длъжности
-
-    @Column(name = "administrative_positions")
-    private Integer administrativePositions;  // 99 - Административни длъжности
-
-    @Column(name = "auxiliary_staff")
-    private Integer auxiliaryStaff;  // 100 - Помощен персонал
-
-    @Column(name = "training_participation")
-    private Integer trainingParticipation;  // 101 - Участие в обучения (CX!)
-
-    @Column(name = "sanctions_imposed")
-    private Integer sanctionsImposed;  // 102 - Наложени санкции
-
-    // === БИБЛИОТЕКА (колони 103-113) ===
-    @Column(name = "library_users")
-    private Integer libraryUsers;  // 103
-
-    @Column(name = "library_users_o")
-    private Integer libraryUsersO;  // 104
-
-    @Column(name = "library_units")
-    private Integer libraryUnits;  // 105
-
-    @Column(name = "newly_acquired")
-    private Integer newlyAcquired;  // 106
-
-    @Column(name = "newly_acquired_1")
-    private Integer newlyAcquired1;  // 107
-
-    @Column(name = "borrowed_documents")
-    private Integer borrowedDocuments;  // 108
-
-    @Column(name = "home_visits")
-    private Integer homeVisits;  // 109
-
-    @Column(name = "reading_room_visits")
-    private Integer readingRoomVisits;  // 110
-
-    @Column(name = "internet_access_education", length = 50)
-    private String internetAccessEducation;  // 111
-
-    @Column(name = "computerized_workplaces")
-    private Integer computerizedWorkplaces;  // 112
-
-    @Column(name = "computerized_workplaces_2")
-    private Integer computerizedWorkplaces2;  // 113
-
-    // === ПРОЕКТИ (колони 114-116) ===
-    @Column(name = "project_participation_regional")
-    private Integer projectParticipationRegional;  // 114
-
-    @Column(name = "project_participation_national")
-    private Integer projectParticipationNational;  // 115
-
-    @Column(name = "project_participation_international")
-    private Integer projectParticipationInternational;  // 116
-
-    // === ЩАТНИ БРОЙКИ (колони 117-120) ===
-    @Column(name = "staff_positions_total")
-    private Integer staffPositionsTotal;  // 117
-
-    @Column(name = "staff_positions_higher_education")
-    private Integer staffPositionsHigherEducation;  // 118
-
-    @Column(name = "staff_positions_secondary_education")
-    private Integer staffPositionsSecondaryEducation;  // 119
-
-    @Column(name = "staff_qualification_participation")
-    private Integer staffQualificationParticipation;  // 120
-
-    // === НАСТОЯТЕЛСТВО (колони 133-136) ===
-    @Column(name = "board_members_total")
-    private Integer boardMembersTotal;  // 133
-
-    @Column(name = "board_members_higher_ed")
-    private Integer boardMembersHigherEd;  // 134
-
-    @Column(name = "board_members_secondary_ed")
-    private Integer boardMembersSecondaryEd;  // 135
-
-    @Column(name = "board_members_primary_ed")
-    private Integer boardMembersPrimaryEd;  // 136
-
-    // === ОБЩ ПЕРСОНАЛ, БРОЙ (колони 137-146) ===
-    @Column(name = "staff_total")
-    private Integer staffTotal;  // 137 - Общо персонал, брой
-
-    @Column(name = "staff_higher_ed")
-    private Integer staffHigherEd;  // 138 - Персонал с висше
-
-    @Column(name = "staff_secondary_ed")
-    private Integer staffSecondaryEd;  // 139 - Персонал със средно
-
-    @Column(name = "staff_primary_ed")
-    private Integer staffPrimaryEd;  // 140 - Персонал с основно
-
-    @Column(name = "staff_employment_contract")
-    private Integer staffEmploymentContract;  // 141 - Персонал с трудов договор
-
-    @Column(name = "staff_civil_contract")
-    private Integer staffCivilContract;  // 142 - Персонал с граждански договор
-
-    // === СЕКРЕТАРИ (колони 143-146) ===
-    @Column(name = "secretaries_total")
-    private Integer secretariesTotal;  // 143
-
-    @Column(name = "secretaries_higher_ed")
-    private Integer secretariesHigherEd;  // 144
-
-    @Column(name = "secretaries_secondary_ed")
-    private Integer secretariesSecondaryEd;  // 145
-
-    @Column(name = "secretaries_primary_ed")
-    private Integer secretariesPrimaryEd;  // 146
-
-    // === ФИНАНСОВИ ДАННИ (колони 147-152) ===
-    @Column(name = "total_revenue", precision = 15, scale = 2)
-    private BigDecimal totalRevenue;  // 147
-
-    @Column(name = "revenue_subsidies", precision = 15, scale = 2)
-    private BigDecimal revenueSubsidies;  // 148
-
-    @Column(name = "revenue_rent", precision = 15, scale = 2)
-    private BigDecimal revenueRent;  // 149
-
-    @Column(name = "total_expenses", precision = 15, scale = 2)
-    private BigDecimal totalExpenses;  // 150
-
-    @Column(name = "expenses_salaries", precision = 15, scale = 2)
-    private BigDecimal expensesSalaries;  // 151
-
-    @Column(name = "expenses_social_security", precision = 15, scale = 2)
-    private BigDecimal expensesSocialSecurity;  // 152
-
-    @Column(name = "employment_contracts_count")
-    private Integer employmentContractsCount;  // 153
-
-    @Column(name = "average_insurance_income", precision = 10, scale = 2)
-    private BigDecimal averageInsuranceIncome;  // 154
-
-    @Column(name = "total_subsidized_positions")
-    private Integer totalSubsidizedPositions;  // 156
-
-    @Column(name = "additional_positions", precision = 10, scale = 2)
-    private BigDecimal additionalPositions;  // 157
-
-    // === F-ФОРМУЛЯРИ ФИНАНСОВИ ПОКАЗАТЕЛИ (колони 23-63) ===
-    @Column(name = "f13000_1_total_expenditure", precision = 15, scale = 2)
-    private BigDecimal f130001TotalExpenditure;  // 23
-
-    @Column(name = "f14100_1_acc_profit", precision = 15, scale = 2)
-    private BigDecimal f141001AccProfit;  // 24
-
-    @Column(name = "f14400_1_pofit", precision = 15, scale = 2)
-    private BigDecimal f144001Pofit;  // 25
-
-    @Column(name = "f15000_1_operating_income", precision = 15, scale = 2)
-    private BigDecimal f150001OperatingIncome;  // 26
-
-    @Column(name = "f18000_1_total_income", precision = 15, scale = 2)
-    private BigDecimal f180001TotalIncome;  // 27
-
-    @Column(name = "f19100_1acc_loss", precision = 15, scale = 2)
-    private BigDecimal f191001accLoss;  // 28
-
-    @Column(name = "f19200_1_loss", precision = 15, scale = 2)
-    private BigDecimal f192001zLoss;  // 29
-
-    @Column(name = "f31000_ext_services_spending", precision = 15, scale = 2)
-    private BigDecimal f31000ExtServicesSpending;  // 30
-
-    @Column(name = "f02100_1_nontangible_assets", precision = 15, scale = 2)
-    private BigDecimal f021001NontangibleAssets;  // 31
-
-    @Column(name = "f02000_1_fixed_assets", precision = 15, scale = 2)
-    private BigDecimal f020001FixedAssets;  // 32
-
-    @Column(name = "f03100_1_material_reserves", precision = 15, scale = 2)
-    private BigDecimal f031001MaterialReserves;  // 33
-
-    @Column(name = "f03200_1_receivables", precision = 15, scale = 2)
-    private BigDecimal f032001Receivables;  // 34
-
-    @Column(name = "f03300_1_investment", precision = 15, scale = 2)
-    private BigDecimal f033001Investment;  // 35
-
-    @Column(name = "f03400_1_bankroll", precision = 15, scale = 2)
-    private BigDecimal f034001Bankroll;  // 36
-
-    @Column(name = "f03000_1_current_assets", precision = 15, scale = 2)
-    private BigDecimal f030001CurrentAssets;  // 37
-
-    @Column(name = "f04500_1_total_assets", precision = 15, scale = 2)
-    private BigDecimal f045001TotalAssets;  // 38
-
-    @Column(name = "f05000_1_own_capital", precision = 15, scale = 2)
-    private BigDecimal f050001OwnCapital;  // 39
-
-    @Column(name = "f07000_1_obligations", precision = 15, scale = 2)
-    private BigDecimal f070001Obligations;  // 40
-
-    @Column(name = "f07001_1_shortterm_obligations", precision = 15, scale = 2)
-    private BigDecimal f070011ShorttermObligations;  // 41
-
-    @Column(name = "f07002_1_longterm_obligations", precision = 15, scale = 2)
-    private BigDecimal f070021LongtermObligations;  // 42
-
+    // Average annual staff
+    // Column AR: average_annual_staff
     @Column(name = "average_annual_staff", precision = 10, scale = 2)
-    private BigDecimal averageAnnualStaff;  // 43
+    private BigDecimal averageAnnualStaff;
 
+    // Net income
+    // Column AS: net_income
     @Column(name = "net_income", precision = 15, scale = 2)
-    private BigDecimal netIncome;  // 44
+    private BigDecimal netIncome;
 
-    @Column(name = "razhodi_personal", precision = 15, scale = 2)
-    private BigDecimal razhodiPersonal;  // 45
+    // Staff expenses
+    // Column AT: staff_expenses
+    @Column(name = "staff_expenses", precision = 15, scale = 2)
+    private BigDecimal staffExpenses;
 
+    // Trade price
+    // Column AU: trade_price
     @Column(name = "trade_price", precision = 15, scale = 2)
-    private BigDecimal tradePrice;  // 46
+    private BigDecimal tradePrice;
 
-    @Column(name = "income_profit", precision = 15, scale = 2)
-    private BigDecimal incomeProfit;  // 47
+    // Income profitability
+    // Column AV: income_profitability
+    @Column(name = "income_profitability", precision = 10, scale = 2)
+    private BigDecimal incomeProfitability;
 
-    @Column(name = "equity_profit", precision = 15, scale = 2)
-    private BigDecimal equityProfit;  // 48
+    // Equity profitability
+    // Column AW: equity_profitability
+    @Column(name = "equity_profitability", precision = 10, scale = 2)
+    private BigDecimal equityProfitability;
 
-    @Column(name = "asset_profit", precision = 15, scale = 2)
-    private BigDecimal assetProfit;  // 49
+    // Asset profitability
+    // Column AX: asset_profitability
+    @Column(name = "asset_profitability", precision = 10, scale = 2)
+    private BigDecimal assetProfitability;
 
-    @Column(name = "financial_autonomy", precision = 15, scale = 2)
-    private BigDecimal financialAutonomy;  // 50
+    // Financial autonomy
+    // Column AY: financial_autonomy
+    @Column(name = "financial_autonomy", precision = 10, scale = 2)
+    private BigDecimal financialAutonomy;
 
-    @Column(name = "financial_debt", precision = 15, scale = 2)
-    private BigDecimal financialDebt;  // 51
+    // Financial debt
+    // Column AZ: financial_debt
+    @Column(name = "financial_debt", precision = 10, scale = 2)
+    private BigDecimal financialDebt;
 
-    @Column(name = "short_term_liquidity", precision = 15, scale = 2)
-    private BigDecimal shortTermLiquidity;  // 52
+    // Short term liquidity
+    // Column BA: short_term_liquidity
+    @Column(name = "short_term_liquidity", precision = 10, scale = 2)
+    private BigDecimal shortTermLiquidity;
 
-    @Column(name = "fast_liquidity", precision = 15, scale = 2)
-    private BigDecimal fastLiquidity;  // 53
+    // Fast liquidity
+    // Column BB: fast_liquidity
+    @Column(name = "fast_liquidity", precision = 10, scale = 2)
+    private BigDecimal fastLiquidity;
 
-    @Column(name = "immediate_liquidity", precision = 15, scale = 2)
-    private BigDecimal immediateLiquidity;  // 54
+    // Immediate liquidity
+    // Column BC: immediate_liquidity
+    @Column(name = "immediate_liquidity", precision = 10, scale = 2)
+    private BigDecimal immediateLiquidity;
 
-    @Column(name = "absolute_liquidity", precision = 15, scale = 2)
-    private BigDecimal absoluteLiquidity;  // 55
+    // Absolute liquidity
+    // Column BD: absolute_liquidity
+    @Column(name = "absolute_liquidity", precision = 10, scale = 2)
+    private BigDecimal absoluteLiquidity;
 
-    @Column(name = "vreme_oborot", precision = 15, scale = 2)
-    private BigDecimal vremeOborot;  // 56
+    // Turnover time
+    // Column BE: turnover_time
+    @Column(name = "turnover_time", precision = 10, scale = 2)
+    private BigDecimal turnoverTime;
 
-    @Column(name = "br_ob", precision = 15, scale = 2)
-    private BigDecimal brOb;  // 57
+    // Turnover count
+    // Column BF: turnover_count
+    @Column(name = "turnover_count", precision = 10, scale = 2)
+    private BigDecimal turnoverCount;
 
-    @Column(name = "zkma", length = 50)
-    private String zkma;  // 58
+    // Debt to tangible assets
+    // Column BG: debt_to_tangible_assets
+    @Column(name = "debt_to_tangible_assets", precision = 10, scale = 2)
+    private BigDecimal debtToTangibleAssets;
 
-    @Column(name = "aktivi_personal", precision = 15, scale = 2)
-    private BigDecimal aktiviPersonal;  // 59
+    // Assets per staff
+    // Column BH: assets_per_staff
+    @Column(name = "assets_per_staff", precision = 15, scale = 2)
+    private BigDecimal assetsPerStaff;
 
-    @Column(name = "zadaljenia_pers", precision = 15, scale = 2)
-    private BigDecimal zadaljeniaPerс;  // 60
+    // Liabilities per staff
+    // Column BI: liabilities_per_staff
+    @Column(name = "liabilities_per_staff", precision = 15, scale = 2)
+    private BigDecimal liabilitiesPerStaff;
 
-    @Column(name = "prihodi_pers", precision = 15, scale = 2)
-    private BigDecimal prihodiPers;  // 61
+    // Income per staff
+    // Column BJ: income_per_staff
+    @Column(name = "income_per_staff", precision = 15, scale = 2)
+    private BigDecimal incomePerStaff;
 
-    @Column(name = "pechalba_pers", precision = 15, scale = 2)
-    private BigDecimal pechalbaPerс;  // 62
+    // Profit per staff
+    // Column BK: profit_per_staff
+    @Column(name = "profit_per_staff", precision = 15, scale = 2)
+    private BigDecimal profitPerStaff;
 
-    @Column(name = "personal", precision = 15, scale = 2)
-    private BigDecimal personal;  // 63
+    // Staff count
+    // Column BL: staff_count
+    @Column(name = "staff_count")
+    private Integer staffCount;
 
-    // === ДРУГИ (колони 19, 166, 174, 175, 178) ===
-    @Column(name = "payment_standard", length = 50)
-    private String paymentStandard;  // 19
+    // ========== CHITALISHTE REGISTRY DATA (columns BM-ED) ==========
 
-    @Column(name = "matriculation_bel_26", precision = 10, scale = 2)
-    private BigDecimal matriculationBel26;  // 166
+    // Chairman
+    // Column BM: chairman
+    @Column(name = "chairman", columnDefinition = "TEXT")
+    private String chairman;
 
-    @Column(name = "nvo_mat", precision = 10, scale = 2)
-    private BigDecimal nvoMat;  // 174
+    // Phone (registry)
+    // Column BN: phone_registry
+    @Column(name = "phone_registry", columnDefinition = "TEXT")
+    private String phoneRegistry;
 
-    @Column(name = "nvo_bel", precision = 10, scale = 2)
-    private BigDecimal nvoBel;  // 175
+    // Secretary
+    // Column BO: secretary
+    @Column(name = "secretary", columnDefinition = "TEXT")
+    private String secretary;
 
-    @Column(name = "poor_health")
-    private Integer poorHealth;  // 178
+    // Status
+    // Column BP: status
+    @Column(name = "status", length = 100)
+    private String status;
+
+    // Total members
+    // Column BQ: total_members
+    @Column(name = "total_members")
+    private Integer totalMembers;
+
+    // Membership applications
+    // Column BR: membership_applications
+    @Column(name = "membership_applications")
+    private Integer membershipApplications;
+
+    // New members
+    // Column BS: new_members
+    @Column(name = "new_members")
+    private Integer newMembers;
+
+    // Rejected applications
+    // Column BT: rejected_applications
+    @Column(name = "rejected_applications")
+    private Integer rejectedApplications;
+
+    // Library activity
+    // Column BU: library_activity
+    @Column(name = "library_activity", columnDefinition = "TEXT")
+    private String libraryActivity;
+
+    // Art clubs count
+    // Column DE: art_clubs
+    @Column(name = "art_clubs")
+    private Integer artClubs;
+
+    // Art clubs description
+    // Column DF: art_clubs_text
+    @Column(name = "art_clubs_text", columnDefinition = "TEXT")
+    private String artClubsText;
+
+    // Language schools count
+    // Column DG: language_schools
+    @Column(name = "language_schools")
+    private Integer languageSchools;
+
+    // Language schools description
+    // Column DH: language_schools_text
+    @Column(name = "language_schools_text", columnDefinition = "TEXT")
+    private String languageSchoolsText;
+
+    // Local history clubs count
+    // Column DI: local_history_clubs
+    @Column(name = "local_history_clubs")
+    private Integer localHistoryClubs;
+
+    // Local history clubs description
+    // Column DJ: local_history_clubs_text
+    @Column(name = "local_history_clubs_text", columnDefinition = "TEXT")
+    private String localHistoryClubsText;
+
+    // Museum collections count
+    // Column DK: museum_collections
+    @Column(name = "museum_collections")
+    private Integer museumCollections;
+
+    // Museum collections description
+    // Column DL: museum_collections_text
+    @Column(name = "museum_collections_text", columnDefinition = "TEXT")
+    private String museumCollectionsText;
+
+    // Folklore groups count
+    // Column DM: folklore_groups
+    @Column(name = "folklore_groups")
+    private Integer folkloreGroups;
+
+    // Theater groups count
+    // Column DN: theater_groups
+    @Column(name = "theater_groups")
+    private Integer theaterGroups;
+
+    // Dance groups count
+    // Column DO: dance_groups
+    @Column(name = "dance_groups")
+    private Integer danceGroups;
+
+    // Classical dance groups count
+    // Column DP: classical_dance_groups
+    @Column(name = "classical_dance_groups")
+    private Integer classicalDanceGroups;
+
+    // Vocal groups count
+    // Column DQ: vocal_groups
+    @Column(name = "vocal_groups")
+    private Integer vocalGroups;
+
+    // Other clubs count
+    // Column DR: other_clubs
+    @Column(name = "other_clubs")
+    private Integer otherClubs;
+
+    // Event participations count
+    // Column DS: event_participations
+    @Column(name = "event_participations")
+    private Integer eventParticipations;
+
+    // Independent projects count
+    // Column DT: independent_projects
+    @Column(name = "independent_projects")
+    private Integer independentProjects;
+
+    // Collaborative projects count
+    // Column DU: collaborative_projects
+    @Column(name = "collaborative_projects")
+    private Integer collaborativeProjects;
+
+    // Disability work description
+    // Column DV: disability_work
+    @Column(name = "disability_work", columnDefinition = "TEXT")
+    private String disabilityWork;
+
+    // Other activities description
+    // Column DW: other_activities
+    @Column(name = "other_activities", columnDefinition = "TEXT")
+    private String otherActivities;
+
+    // Subsidized staff count
+    // Column DX: subsidized_staff_count
+    @Column(name = "subsidized_staff_count")
+    private Integer subsidizedStaffCount;
+
+    // Total staff (registry)
+    // Column DY: total_staff_registry
+    @Column(name = "total_staff_registry")
+    private Integer totalStaffRegistry;
+
+    // Staff with higher education
+    // Column DZ: staff_higher_edu
+    @Column(name = "staff_higher_edu")
+    private Integer staffHigherEdu;
+
+    // Specialized positions count
+    // Column EA: specialized_positions
+    @Column(name = "specialized_positions")
+    private Integer specializedPositions;
+
+    // Administrative positions count
+    // Column EB: administrative_positions
+    @Column(name = "administrative_positions")
+    private Integer administrativePositions;
+
+    // Support staff count
+    // Column EC: support_staff
+    @Column(name = "support_staff")
+    private Integer supportStaff;
+
+    // Training participation count
+    // Column CX: training_participation (NOTE: CX not EC!)
+    @Column(name = "training_participation")
+    private Integer trainingParticipation;
+
+    // Imposed sanctions count
+    // Column ED: imposed_sanctions
+    @Column(name = "imposed_sanctions")
+    private Integer imposedSanctions;
+
+    // ========== LIBRARY DATA (columns EE-EV) ==========
+
+    // Library users count
+    // Column EE: library_users
+    @Column(name = "library_users")
+    private Integer libraryUsers;
+
+    // Library users online count
+    // Column EF: library_users_online
+    @Column(name = "library_users_online")
+    private Integer libraryUsersOnline;
+
+    // Library units count
+    // Column EG: library_units
+    @Column(name = "library_units")
+    private Integer libraryUnits;
+
+    // Newly acquired items count
+    // Column EH: newly_acquired
+    @Column(name = "newly_acquired")
+    private Integer newlyAcquired;
+
+    // Newly acquired items count (alternative)
+    // Column EI: newly_acquired_alt
+    @Column(name = "newly_acquired_alt")
+    private Integer newlyAcquiredAlt;
+
+    // Borrowed documents count
+    // Column EJ: borrowed_documents
+    @Column(name = "borrowed_documents")
+    private Integer borrowedDocuments;
+
+    // Home visits count
+    // Column EK: home_visits
+    @Column(name = "home_visits")
+    private Integer homeVisits;
+
+    // Reading room visits count
+    // Column EL: reading_room_visits
+    @Column(name = "reading_room_visits")
+    private Integer readingRoomVisits;
+
+    // Internet access count
+    // Column EM: internet_access
+    @Column(name = "internet_access")
+    private Integer internetAccess;
+
+    // Computerized workstations count
+    // Column EN: computerized_workstations
+    @Column(name = "computerized_workstations")
+    private Integer computerizedWorkstations;
+
+    // Computerized workstations count (alternative)
+    // Column EO: computerized_workstations_alt
+    @Column(name = "computerized_workstations_alt")
+    private Integer computerizedWorkstationsAlt;
+
+    // Regional projects count
+    // Column EP: regional_projects
+    @Column(name = "regional_projects")
+    private Integer regionalProjects;
+
+    // National projects count
+    // Column EQ: national_projects
+    @Column(name = "national_projects")
+    private Integer nationalProjects;
+
+    // International projects count
+    // Column ER: international_projects
+    @Column(name = "international_projects")
+    private Integer internationalProjects;
+
+    // Library staff total count
+    // Column ES: library_staff_total
+    @Column(name = "library_staff_total")
+    private Integer libraryStaffTotal;
+
+    // Library staff with higher education count
+    // Column ET: library_staff_higher_edu
+    @Column(name = "library_staff_higher_edu")
+    private Integer libraryStaffHigherEdu;
+
+    // Library staff with secondary education count
+    // Column EU: library_staff_secondary_edu
+    @Column(name = "library_staff_secondary_edu")
+    private Integer libraryStaffSecondaryEdu;
+
+    // Library staff training participation count
+    // Column EV: library_staff_training
+    @Column(name = "library_staff_training")
+    private Integer libraryStaffTraining;
 }

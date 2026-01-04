@@ -28,7 +28,6 @@ public class GeocodingService {
     private String dataPath;
 
     private final ObjectMapper objectMapper;
-    private Map<String, String> geoJsonCache = new HashMap<>();
     private List<Map<String, String>> municipalitiesData = new ArrayList<>();
 
     public GeocodingService(ObjectMapper objectMapper) {

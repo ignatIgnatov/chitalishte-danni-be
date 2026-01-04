@@ -15,7 +15,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/geocoding")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*") // Configure properly for production
 public class GeocodingController {
 
     private final GeocodingService geocodingService;

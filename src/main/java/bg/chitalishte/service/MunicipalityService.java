@@ -4,9 +4,7 @@ import bg.chitalishte.dto.*;
 import bg.chitalishte.entity.Chitalishte;
 import bg.chitalishte.mapper.ChitalishteMapper;
 import bg.chitalishte.mapper.MunicipalityMapper;
-import bg.chitalishte.mapper.MunicipalityMetricsMapper;
 import bg.chitalishte.repository.ChitalishteRepository;
-import bg.chitalishte.repository.MunicipalityMetricsRepository;
 import bg.chitalishte.repository.MunicipalityRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j

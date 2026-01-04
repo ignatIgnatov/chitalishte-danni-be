@@ -1,7 +1,9 @@
 package bg.chitalishte.controller;
 
+import bg.chitalishte.service.AsyncImportService;
 import bg.chitalishte.service.ChitalishteImportService;
 import bg.chitalishte.service.MunicipalityMetricsService;
+import io.swagger.v3.oas.annotations.Hidden;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -10,47 +12,45 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 
 @Slf4j
 @RestController
 @RequestMapping("/api/admin")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class AdminController {
 
     private final MunicipalityMetricsService metricsService;
-    private final ChitalishteImportService importService;
+    private final AsyncImportService asyncImportService;
+    private final ChitalishteImportService chitalishteImportService;
 
+    @Hidden
     @PostMapping("/chitalishta/import")
-    public ResponseEntity<?> importExcel(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> uploadFile(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "clearExisting", defaultValue = "false") boolean clearExisting) {
+
+        log.info("📁 Получен файл за импорт: {}", file.getOriginalFilename());
+
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Файлът е празен"));
+        }
+
         try {
-            log.info("Получен файл за импорт: {}", file.getOriginalFilename());
+            // Стартирай асинхронно
+            asyncImportService.importAsync(file, clearExisting);
 
-            if (file.isEmpty()) {
-                return ResponseEntity.badRequest().body("Файлът е празен");
-            }
+            // Веднага върни response
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "processing");
+            response.put("message", "Импортът е стартиран и се изпълнява във фонов режим. Проверете логовете за прогрес.");
+            response.put("filename", file.getOriginalFilename());
 
-            if (!Objects.requireNonNull(file.getOriginalFilename()).endsWith(".xlsx")) {
-                return ResponseEntity.badRequest().body("Поддържа се само .xlsx формат");
-            }
-
-            Map<String, Integer> result = importService.importFromExcel(file, false);
-
-            return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "message", "Успешен импорт",
-                    "municipalities", result.get("municipalities"),
-                    "chitalishta", result.get("chitalishta"),
-                    "yearData", result.get("yearData")
-            ));
+            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            log.error("Грешка при импорт: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError().body(Map.of(
-                    "success", false,
-                    "error", e.getMessage()
-            ));
+            log.error("❌ Грешка при стартиране на импорт: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Грешка при импорт: " + e.getMessage()));
         }
     }
 
@@ -62,7 +62,7 @@ public class AdminController {
         ));
     }
 
-
+    @Hidden
     @PostMapping("/calculate-metrics")
     public ResponseEntity<Map<String, Object>> calculateMetrics() {
         log.info("🚀 Starting metrics calculation...");

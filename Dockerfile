@@ -28,5 +28,8 @@ COPY --from=builder /app/target/*.jar app.jar
 # Експозваме порта
 EXPOSE 8080
 
-# Стартираме приложението
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Конфигурация на JVM - УВЕЛИЧЕНА ПАМЕТ ЗА IMPORT
+ENV JAVA_OPTS="-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:MaxMetaspaceSize=256m"
+
+# Стартираме приложението с JVM опции
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

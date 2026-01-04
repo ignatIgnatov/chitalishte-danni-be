@@ -8,8 +8,9 @@ spring:
     password: ${DB_PASSWORD:chitalishta_danni_db_pass}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 5
+      # Reduced for better memory usage during import
+      maximum-pool-size: 5
+      minimum-idle: 2
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000
@@ -21,18 +22,21 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
+        format_sql: false
         jdbc:
-          batch_size: 20
+          # Optimized batch size for memory efficiency
+          batch_size: 50
         order_inserts: true
         order_updates: true
+        batch_versioned_data: true
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 
   servlet:
     multipart:
       enabled: true
-      max-file-size: 50MB
-      max-request-size: 50MB
+      # Increased for large Excel files
+      max-file-size: 100MB
+      max-request-size: 100MB
 
   cache:
     type: caffeine
@@ -40,35 +44,35 @@ spring:
     caffeine:
       spec: maximumSize=100,expireAfterWrite=24h
 
-    jackson:
-      default-property-inclusion: non_null
-      serialization:
-        indent-output: false
-        write-dates-as-timestamps: false
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      indent-output: false
+      write-dates-as-timestamps: false
 
-    http:
-      encoding:
-        charset: UTF-8
-        enabled: true
-        force: true
+  http:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
 
-    mvc:
-      async:
-        request-timeout: 60000
+  mvc:
+    async:
+      # Increased for long-running import operations
+      request-timeout: 300000
 
 server:
   port: ${SERVER_PORT:8080}
   servlet:
     context-path: /
-    multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
     compression:
       enabled: true
       mime-types: application/json,text/html,text/xml,text/plain,text/css,application/javascript
-    tomcat:
-      max-threads: 200
-      accept-count: 100
+  tomcat:
+    max-threads: 200
+    accept-count: 100
+    # Increased for import operations
+    connection-timeout: 300000
   error:
     include-message: always
     include-binding-errors: always
@@ -78,9 +82,11 @@ server:
 logging:
   level:
     root: INFO
-    bg.chitalishte: DEBUG
+    bg.chitalishte: INFO
     org.springframework.web: INFO
-    org.hibernate: INFO
+    # Reduced logging during import for better performance
+    org.hibernate: WARN
+    org.hibernate.SQL: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
@@ -103,3 +109,22 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
     enabled: true
+
+cors:
+  allowed-origins:
+    - http://localhost:3000
+    - http://13.50.111.29:3000
+  allowed-methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - PATCH
+    - OPTIONS
+  allowed-headers:
+    - "*"
+  exposed-headers:
+    - Content-Disposition
+    - X-Total-Count
+  allow-credentials: true
+  max-age: 3600
