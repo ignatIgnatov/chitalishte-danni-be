@@ -61,4 +61,6 @@ public interface ChitalishteRepository extends JpaRepository<Chitalishte, UUID> 
             "LOWER(c.name) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
             "LOWER(c.town) LIKE LOWER(CONCAT('%', :query, '%'))")
     List<Chitalishte> searchByName(@Param("query") String query);
+
+    List<Chitalishte> findAllBySlugIsNull();
 }

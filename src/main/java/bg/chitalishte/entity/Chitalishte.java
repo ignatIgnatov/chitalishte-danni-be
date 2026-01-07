@@ -45,6 +45,9 @@ public class Chitalishte {
     @Column(name = "reg_n", unique = true, nullable = false, length = 50)
     private String regN;
 
+    @Column
+    private String slug;
+
     // ========== ОСНОВНА ИНФОРМАЦИЯ ==========
 
     // Име на читалище

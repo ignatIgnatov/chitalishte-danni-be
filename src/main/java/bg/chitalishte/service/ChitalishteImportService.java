@@ -5,6 +5,7 @@ import bg.chitalishte.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -63,7 +64,7 @@ public class ChitalishteImportService {
         Workbook workbook = null;
         try {
             log.info("Creating workbook from input stream...");
-            workbook = WorkbookFactory.create(inputStream);
+            workbook = new XSSFWorkbook(inputStream);
             log.info("Workbook created successfully");
 
             Sheet sheet = workbook.getSheetAt(0);

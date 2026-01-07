@@ -31,6 +31,7 @@ public class ChitalishteMapper {
                 .uic(entity.getUic())
                 .status(latestData != null ? latestData.getStatus() : null)
                 .latestYear(latestData != null ? latestData.getYear() : null)
+                .slug(entity.getSlug())
                 .build();
     }
 }

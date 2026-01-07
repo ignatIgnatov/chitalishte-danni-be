@@ -25,7 +25,7 @@ spring:
         format_sql: false
         jdbc:
           # Optimized batch size for memory efficiency
-          batch_size: 50
+          batch_size: 25
         order_inserts: true
         order_updates: true
         batch_versioned_data: true

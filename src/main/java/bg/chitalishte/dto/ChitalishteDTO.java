@@ -23,4 +23,5 @@ public class ChitalishteDTO {
     private String uic;
     private String status;
     private Integer latestYear;
+    private String slug;
 }

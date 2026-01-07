@@ -24,35 +24,14 @@ public class AsyncImportService {
 
     /**
      * Import data from Excel file asynchronously
-     *
-     * @param file Excel file to import
-     * @param clearExisting whether to clear existing data before import (not implemented yet)
-     * @return CompletableFuture with import statistics
      */
     @Async
     public CompletableFuture<Map<String, Integer>> importAsync(MultipartFile file, boolean clearExisting) {
         try {
             log.info("Starting asynchronous import from file: {}", file.getOriginalFilename());
 
-            // Copy file temporarily (MultipartFile is not thread-safe)
-            File tempFile = File.createTempFile("import-", ".xlsx");
-            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                fos.write(file.getBytes());
-            }
-
-            log.info("Temporary file created: {}", tempFile.getAbsolutePath());
-
-            // Create CustomMultipartFile from temporary file
-            CustomMultipartFile customFile = new CustomMultipartFile(tempFile, file.getOriginalFilename());
-
-            // Perform import
-            Map<String, Integer> result = importService.importFromExcel(customFile.getInputStream());
-
-            // Delete temporary file
-            boolean deleted = tempFile.delete();
-            if (!deleted) {
-                log.warn("Failed to delete temporary file: {}", tempFile.getAbsolutePath());
-            }
+            // Директно използвай InputStream без temp file
+            Map<String, Integer> result = importService.importFromExcel(file.getInputStream());
 
             log.info("Asynchronous import completed successfully. Stats: {}", result);
             return CompletableFuture.completedFuture(result);
